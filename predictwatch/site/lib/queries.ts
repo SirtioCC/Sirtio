@@ -108,7 +108,7 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
       END AS pm_score
     FROM latest_leaderboard l
     LEFT JOIN position_stats p ON p.wallet = l.wallet
-    ORDER BY l.rank ASC
+    ORDER BY pm_score DESC NULLS LAST, l.rank ASC
     LIMIT ${limit}
   `;
   return rows.map((r) => ({
@@ -134,3 +134,4 @@ export async function getHeroStats(): Promise<HeroStats> {
     total_traders: Number(row.total_traders),
   };
 }
+

@@ -11,6 +11,15 @@ function formatVolume(v: number | null) {
   return `$${v.toFixed(0)}`;
 }
 
+function formatPnl(v: number | null) {
+  if (v === null) return "--";
+  const sign = v >= 0 ? "+" : "-";
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(0)}K`;
+  return `${sign}$${abs.toFixed(0)}`;
+}
+
 export default async function LeaderboardPage() {
   const traders = await getLeaderboard(25);
 
@@ -42,20 +51,21 @@ export default async function LeaderboardPage() {
           </p>
         ) : (
           <div>
-            <div className="grid grid-cols-[40px_1fr_100px_100px_100px] gap-6 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
+            <div className="grid grid-cols-[40px_1fr_100px_100px_100px_100px] gap-6 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
               <span>#</span>
               <span>Trader</span>
               <span className="text-right">PM Score</span>
               <span className="text-right">Win rate</span>
               <span className="text-right">Volume</span>
+              <span className="text-right">PNL</span>
             </div>
-            {traders.map((t) => (
+            {traders.map((t, i) => (
               <div
                 key={t.wallet}
-                className="grid grid-cols-[40px_1fr_100px_100px_100px] items-center gap-6 py-4 border-b border-hairline"
+                className="grid grid-cols-[40px_1fr_100px_100px_100px_100px] items-center gap-6 py-4 border-b border-hairline"
               >
                 <span className="font-mono text-muted text-sm">
-                  {String(t.rank).padStart(2, "0")}
+                  {String(i + 1).padStart(2, "0")}
                 </span>
                 <div>
                   
@@ -81,6 +91,9 @@ export default async function LeaderboardPage() {
                 </span>
                 <span className="font-mono text-sm text-muted text-right">
                   {formatVolume(t.volume)}
+                </span>
+                <span className={`font-mono text-sm text-right ${(t.pnl ?? 0) >= 0 ? "text-signal-yes" : "text-signal-no"}`}>
+                  {formatPnl(t.pnl)}
                 </span>
               </div>
             ))}

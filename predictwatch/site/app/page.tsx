@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import Nav from "@/components/Nav";
 import ProbabilityBar from "@/components/ProbabilityBar";
 import { getTopMarkets, getLeaderboard, getHeroStats } from "@/lib/queries";
@@ -24,7 +24,7 @@ export default async function Home() {
 
       <section className="max-w-6xl mx-auto px-6 pt-20 pb-16">
         <p className="font-mono text-xs uppercase tracking-widest text-accent mb-6">
-          Kalshi · Polymarket
+          Kalshi Â· Polymarket
         </p>
         <h1 className="font-[family-name:var(--font-display)] text-5xl md:text-6xl leading-[1.05] max-w-3xl text-parchment">
           Is this trader{" "}
@@ -33,7 +33,7 @@ export default async function Home() {
         </h1>
         <p className="mt-6 text-lg text-muted max-w-xl">
           Every prediction-market leaderboard ranks by raw dollars. We rank by
-          skill — win rate, consistency, and edge, weighted by how much
+          skill â€” win rate, consistency, and edge, weighted by how much
           history actually backs it up.
         </p>
         <div className="mt-10 flex gap-4">
@@ -81,7 +81,7 @@ export default async function Home() {
             Most active markets
           </h2>
           <Link href="/markets" className="text-sm text-accent hover:underline">
-            View all →
+            View all â†’
           </Link>
         </div>
         <div className="space-y-1">
@@ -93,7 +93,7 @@ export default async function Home() {
               <div>
                 <p className="text-parchment">{m.title}</p>
                 <p className="text-xs text-muted mt-1 uppercase tracking-wide">
-                  {m.source} · {formatVolume(m.volume)} vol
+                  {m.source} Â· {formatVolume(m.volume)} vol
                 </p>
               </div>
               <ProbabilityBar yesPriceCents={m.yes_price_cents} />
@@ -108,17 +108,17 @@ export default async function Home() {
             Top traders by skill
           </h2>
           <Link href="/leaderboard" className="text-sm text-accent hover:underline">
-            Full leaderboard →
+            Full leaderboard â†’
           </Link>
         </div>
         <div className="space-y-1">
-          {leaderboard.map((t) => (
+          {leaderboard.map((t, i) => (
             <div
               key={t.wallet}
               className="grid grid-cols-[40px_1fr_100px_100px] items-center gap-6 py-4 border-b border-hairline"
             >
               <span className="font-mono text-muted text-sm">
-                {String(t.rank).padStart(2, "0")}
+                {String(i + 1).padStart(2, "0")}
               </span>
               <div>
                 <p className="text-parchment">
@@ -129,7 +129,7 @@ export default async function Home() {
                 </p>
               </div>
               <span className="font-mono text-sm text-signal-yes">
-                {t.pm_score !== null ? t.pm_score.toFixed(1) : "—"}
+                {t.pm_score !== null ? t.pm_score.toFixed(1) : "â€”"}
               </span>
               <span className="font-mono text-sm text-muted text-right">
                 {formatVolume(t.pnl)} pnl
@@ -146,3 +146,4 @@ export default async function Home() {
     </div>
   );
 }
+

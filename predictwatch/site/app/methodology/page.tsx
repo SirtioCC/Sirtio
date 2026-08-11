@@ -176,6 +176,25 @@ PM Score = score x min(resolved_positions / 30, 1)`}</pre>
           <li className="flex gap-3">
             <span className="text-signal-no mt-1">-</span>
             <span>
+              <strong className="text-parchment">
+                Consistency can still favor "safe" traders.
+              </strong>{" "}
+              Even with entropy-weighted win rate, the consistency
+              component (25% weight) rewards low-variance returns --
+              and genuine coin-flip betting is inherently higher
+              variance than sticking to safe favorites, even when the
+              trader is actually good at reading close calls. A steady
+              stream of small, obvious wins can currently out-score a
+              genuinely skilled coin-flip trader through this
+              component. Properly fixing this likely means moving to
+              a calibration-based score (e.g. Brier or log score)
+              instead of a variance-based one -- a bigger change, not
+              done yet.
+            </span>
+          </li>
+          <li className="flex gap-3">
+            <span className="text-signal-no mt-1">-</span>
+            <span>
               <strong className="text-parchment">Directional, not precise.</strong>{" "}
               Read PM Score as "this trader looks more skilled than that
               one," not as a confident numeric ranking down to the
