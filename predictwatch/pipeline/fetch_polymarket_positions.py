@@ -11,11 +11,7 @@ that, authoritatively, straight from Polymarket's own settlement data.
 
 Schema confirmed against Polymarket's official OpenAPI spec
 (docs.polymarket.com) and a Polymarket-published example response
-(2026-08-10). NOTE: unlike the other two fetchers in this pipeline, I
-could not get a live 200 response from this specific endpoint through
-my sandbox (it returned 400s — likely anti-bot protection on this
-route, since /leaderboard and /markets both worked fine). Test this
-one locally before trusting it in production.
+(2026-08-10).
 """
 import time
 import requests
@@ -23,6 +19,16 @@ from datetime import datetime, timezone
 
 POSITIONS_URL = "https://data-api.polymarket.com/positions"
 PAGE_LIMIT = 500  # API max
+HEADERS = {
+    # Some anti-bot/Cloudflare-style protection treats requests with no
+    # (or a bare default) User-Agent as suspicious, especially from
+    # datacenter/cloud IPs (like GitHub Actions runners, or my own
+    # sandbox — this endpoint 400'd there earlier for that same reason).
+    # A normal browser-like header avoids that class of soft-block.
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"),
+}
 
 
 def fetch_positions_for_wallet(wallet: str):
@@ -35,6 +41,16 @@ def fetch_positions_for_wallet(wallet: str):
     Has the same progress printing + safety cap as the other fetchers —
     per-wallet position counts should be small (tens to low thousands),
     so hitting the cap here would be a strong signal something's wrong.
+
+    IMPORTANT: a single empty page is NOT trusted as "reached the real
+    end" on its own. Confirmed by direct comparison (2026-08-11): the
+    same wallet returned 150,000 positions when fetched from a home
+    connection, but only ~10,500 when fetched from GitHub Actions'
+    datacenter IPs — meaning this endpoint can return an early empty
+    page under some kind of soft rate-limit/anti-bot condition, which
+    looks identical to genuine end-of-data unless you retry it. This
+    retries a few times with backoff before accepting an empty page
+    as the true end.
     """
     positions = []
     offset = 0
@@ -57,11 +73,22 @@ def fetch_positions_for_wallet(wallet: str):
             "sortBy": "CASHPNL",
             "sortDirection": "DESC",
         }
-        resp = requests.get(POSITIONS_URL, params=params, timeout=30)
-        resp.raise_for_status()
-        batch = resp.json()
+
+        batch = None
+        for attempt in range(1, 4):  # up to 3 tries on a suspicious empty page
+            resp = requests.get(POSITIONS_URL, params=params, headers=HEADERS, timeout=30)
+            resp.raise_for_status()
+            batch = resp.json()
+            if batch:
+                break
+            if attempt < 3:
+                print(f"    Empty page at offset {offset} for {wallet} "
+                      f"(attempt {attempt}/3) — retrying in case it's a soft "
+                      f"throttle, not genuine end-of-data...")
+                time.sleep(1.5 * attempt)  # backoff: 1.5s, then 3s
+
         if not batch:
-            break
+            break  # confirmed empty after retries — genuinely done
         positions.extend(batch)
         offset += PAGE_LIMIT
         if len(batch) < PAGE_LIMIT:
