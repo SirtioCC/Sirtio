@@ -12,18 +12,50 @@ PAGE_LIMIT = 200
 
 
 def fetch_all_markets(status="open"):
-    """Fetch all markets with pagination. Returns a list of market dicts."""
+    """
+    Fetch all markets with pagination. Returns a list of market dicts.
+
+    Prints progress per page — without this, a large result set (Kalshi
+    has many thousands of open markets once you count every sports prop)
+    looks identical to a stuck/hung request. max_pages is a hard safety
+    cap so a pagination bug (a cursor that never actually advances)
+    can't loop forever silently. Also detects a repeating cursor
+    directly — that's the clearest signal of a real pagination bug,
+    as opposed to a dataset that's just genuinely large.
+    """
     markets = []
     cursor = None
+    page_num = 0
+    max_pages = 2000  # raised ceiling — Kalshi's sports-prop expansion
+                       # means a legitimately large open-market count
+                       # is plausible; this is now a true safety net,
+                       # not an expected stopping point
+    seen_cursors = set()
     while True:
-        params = {"limit": PAGE_LIMIT, "status": status}
+        page_num += 1
+        if page_num > max_pages:
+            print(f"  Hit safety cap of {max_pages} pages — stopping. "
+                  f"At this size, something is likely still wrong.")
+            break
+        params = {"limit": PAGE_LIMIT, "status": status, "mve_filter": "exclude"}
         if cursor:
             params["cursor"] = cursor
         resp = requests.get(f"{BASE_URL}/markets", params=params, timeout=30)
         resp.raise_for_status()
         data = resp.json()
-        markets.extend(data.get("markets", []))
-        cursor = data.get("cursor")
+        batch = data.get("markets", [])
+        markets.extend(batch)
+        print(f"  page {page_num}: +{len(batch)} markets (running total: {len(markets)})")
+
+        new_cursor = data.get("cursor")
+        if new_cursor and new_cursor in seen_cursors:
+            print(f"  BUG DETECTED: cursor '{new_cursor[:20]}...' was already seen — "
+                  f"pagination is not advancing. Stopping here; the data collected "
+                  f"so far is likely incomplete/duplicated and shouldn't be trusted.")
+            break
+        if new_cursor:
+            seen_cursors.add(new_cursor)
+        cursor = new_cursor
         if not cursor:
             break
         time.sleep(0.2)  # be polite, stay under rate limits
@@ -67,9 +99,22 @@ def normalize_market(m: dict) -> dict:
     }
 
 
-def run():
+def run(min_volume=1):
+    """
+    min_volume filters out markets with no real trading activity.
+    Kalshi lists tens of thousands of individual player-prop markets;
+    the vast majority have zero or near-zero volume and are dead
+    weight for an accuracy/analytics product. Filtering these out
+    dramatically cuts row count and keeps storage sane on Supabase's
+    free tier — without this, a single day's worth of pipeline runs
+    (every 4 hours) can approach the 500MB free-tier ceiling.
+    """
     raw = fetch_all_markets(status="open")
-    return [normalize_market(m) for m in raw]
+    normalized = [normalize_market(m) for m in raw]
+    filtered = [r for r in normalized if (r["volume"] or 0) >= min_volume]
+    print(f"  Kept {len(filtered)} of {len(normalized)} markets after "
+          f"filtering out volume < {min_volume}")
+    return filtered
 
 
 if __name__ == "__main__":

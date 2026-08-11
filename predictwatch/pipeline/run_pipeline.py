@@ -66,8 +66,14 @@ CREATE TABLE IF NOT EXISTS trader_positions_snapshots (
     fetched_at TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_positions_wallet ON trader_positions_snapshots(wallet);
-CREATE INDEX IF NOT EXISTS idx_positions_condition ON trader_positions_snapshots(condition_id);
 CREATE INDEX IF NOT EXISTS idx_positions_fetched_at ON trader_positions_snapshots(fetched_at);
+-- Current-state table, not a time series: one row per (wallet, market),
+-- updated in place each run instead of appended. Without this, a single
+-- wallet like the #1 leaderboard trader (150,000+ positions) would add
+-- that many fresh rows on every scheduled run, forever. This unique
+-- index is what ON CONFLICT below targets to make that possible.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_wallet_condition
+    ON trader_positions_snapshots(wallet, condition_id);
 """
 
 INSERT_SQL = """
@@ -92,6 +98,18 @@ INSERT INTO trader_positions_snapshots
 VALUES (%(wallet)s, %(condition_id)s, %(market_title)s, %(outcome)s, %(size)s,
         %(avg_price)s, %(cur_price)s, %(cash_pnl)s, %(realized_pnl)s,
         %(percent_realized_pnl)s, %(redeemable)s, %(end_date)s, %(fetched_at)s)
+ON CONFLICT (wallet, condition_id) DO UPDATE SET
+    market_title = EXCLUDED.market_title,
+    outcome = EXCLUDED.outcome,
+    size = EXCLUDED.size,
+    avg_price = EXCLUDED.avg_price,
+    cur_price = EXCLUDED.cur_price,
+    cash_pnl = EXCLUDED.cash_pnl,
+    realized_pnl = EXCLUDED.realized_pnl,
+    percent_realized_pnl = EXCLUDED.percent_realized_pnl,
+    redeemable = EXCLUDED.redeemable,
+    end_date = EXCLUDED.end_date,
+    fetched_at = EXCLUDED.fetched_at
 """
 
 
