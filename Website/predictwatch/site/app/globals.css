@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+:root {
+  /* Ink-ledger palette — deliberately not pure black, not the
+     cream+terracotta or broadsheet defaults. Navy reads as "market
+     terminal" without being a generic dark-mode dashboard. */
+  --ink: #0b1220;
+  --surface: #101a2e;
+  --surface-raised: #16233d;
+  --hairline: #24314a;
+  --parchment: #ede7da;
+  --muted: #8d9bb8;
+  --signal-yes: #4fbf8b;
+  --signal-no: #e2694b;
+  --accent: #e8a33d;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-hairline: var(--hairline);
+  --color-parchment: var(--parchment);
+  --color-muted: var(--muted);
+  --color-signal-yes: var(--signal-yes);
+  --color-signal-no: var(--signal-no);
+  --color-accent: var(--accent);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--ink);
+  color: var(--parchment);
+  font-family: var(--font-body), system-ui, sans-serif;
+}
