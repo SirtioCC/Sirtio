@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 
 export default function Nav() {
   return (
@@ -16,6 +16,9 @@ export default function Nav() {
           </Link>
           <Link href="/leaderboard" className="hover:text-parchment transition-colors">
             Traders
+          </Link>
+          <Link href="/methodology" className="hover:text-parchment transition-colors">
+            Methodology
           </Link>
         </div>
       </nav>

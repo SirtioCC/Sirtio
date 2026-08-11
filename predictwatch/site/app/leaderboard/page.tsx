@@ -1,4 +1,5 @@
-﻿import Nav from "@/components/Nav";
+﻿import Link from "next/link";
+import Nav from "@/components/Nav";
 import CopyableWallet from "@/components/CopyableWallet";
 import { getLeaderboard } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
@@ -21,19 +22,23 @@ export default async function LeaderboardPage() {
           Trader leaderboard
         </h1>
         <p className="text-muted mb-2">
-          Polymarket only — Kalshi doesn&apos;t expose public trader data.
+          Polymarket only -- Kalshi doesn't expose public trader data.
         </p>
         <p className="text-xs text-muted mb-10">
           PM Score is a first-pass formula (win rate, edge, consistency,
-          damped by sample size). It needs more resolved history to
-          validate — read it as directional, not precise. Names are
-          shown as-is from Polymarket; click a wallet address to copy it,
-          or a trader&apos;s name to view their public Polymarket profile.
+          damped by sample size) --{" "}
+          <Link href="/methodology" className="text-accent hover:underline">
+            read the full methodology
+          </Link>
+          . It needs more resolved history to validate -- read it as
+          directional, not precise. Names are shown as-is from
+          Polymarket; click a wallet address to copy it, or a
+          trader's name to view their public Polymarket profile.
         </p>
 
         {traders.length === 0 ? (
           <p className="text-muted">
-            No trader data yet — run the pipeline to populate data.
+            No trader data yet -- run the pipeline to populate data.
           </p>
         ) : (
           <div>
@@ -64,15 +69,15 @@ export default async function LeaderboardPage() {
                   <div className="mt-1 flex items-center gap-2">
                     <CopyableWallet wallet={t.wallet} />
                     <span className="text-xs text-muted">
-                      · {t.position_count} positions
+                      . {t.position_count} positions
                     </span>
                   </div>
                 </div>
                 <span className="font-mono text-sm text-signal-yes text-right">
-                  {t.pm_score !== null ? t.pm_score.toFixed(1) : "—"}
+                  {t.pm_score !== null ? t.pm_score.toFixed(1) : "--"}
                 </span>
                 <span className="font-mono text-sm text-muted text-right">
-                  {t.win_rate !== null ? `${(t.win_rate * 100).toFixed(0)}%` : "—"}
+                  {t.win_rate !== null ? `${(t.win_rate * 100).toFixed(0)}%` : "--"}
                 </span>
                 <span className="font-mono text-sm text-muted text-right">
                   {formatVolume(t.volume)}

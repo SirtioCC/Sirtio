@@ -1,4 +1,4 @@
-import sql from "./db";
+﻿import sql from "./db";
 
 export type Market = {
   source: string;
@@ -34,12 +34,6 @@ export type HeroStats = {
   last_updated: string | null;
 };
 
-/**
- * Latest snapshot per market (DISTINCT ON handles the fact that
- * market_snapshots is an intentional time series — every pipeline run
- * adds a new row per market, so we take the most recent one), sorted
- * by volume descending.
- */
 export async function getTopMarkets(limit = 20): Promise<Market[]> {
   const rows = await sql<Market[]>`
     SELECT DISTINCT ON (source, external_id)
@@ -54,33 +48,37 @@ export async function getTopMarkets(limit = 20): Promise<Market[]> {
     .slice(0, limit);
 }
 
-/**
- * Trader leaderboard joined with a first-pass PM Score computed from
- * trader_positions_snapshots (the current-state, upserted table — see
- * README for why this table doesn't need DISTINCT ON the way
- * market_snapshots does).
- *
- * This is the v0 formula from README.md: win rate + normalized average
- * edge + consistency, damped by sample size so a wallet with a
- * handful of positions can't outrank one with thousands. It needs real
- * backtesting before it means anything precise — treat the score as
- * directional, not authoritative, until there's enough resolved
- * history to validate the weights against.
- */
 export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
   const rows = await sql<LeaderboardTrader[]>`
     WITH latest_leaderboard AS (
       SELECT * FROM trader_leaderboard_snapshots
       WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
     ),
+    position_entropy AS (
+      SELECT
+        wallet,
+        cash_pnl,
+        percent_realized_pnl,
+        LEAST(GREATEST(avg_price, 0.001), 0.999) AS p
+      FROM trader_positions_snapshots
+    ),
+    position_entropy_calc AS (
+      SELECT
+        wallet,
+        cash_pnl,
+        percent_realized_pnl,
+        (-(p * LN(p) + (1 - p) * LN(1 - p))) AS entropy
+      FROM position_entropy
+    ),
     position_stats AS (
       SELECT
         wallet,
         COUNT(*) AS position_count,
-        AVG(CASE WHEN cash_pnl > 0 THEN 1.0 ELSE 0.0 END) AS win_rate,
+        SUM(CASE WHEN cash_pnl > 0 THEN entropy ELSE 0 END)
+          / NULLIF(SUM(entropy), 0) AS win_rate,
         AVG(percent_realized_pnl) AS avg_edge_pct,
         STDDEV(percent_realized_pnl) AS pnl_stddev
-      FROM trader_positions_snapshots
+      FROM position_entropy_calc
       GROUP BY wallet
     )
     SELECT
@@ -113,12 +111,6 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
     ORDER BY l.rank ASC
     LIMIT ${limit}
   `;
-  // Postgres NUMERIC (what ROUND(...::numeric, 1) returns) comes back
-  // from the driver as a string, not a JS number — this is deliberate
-  // on the driver's part, to avoid silent precision loss, but it means
-  // .toFixed() elsewhere in the app would crash on it unless we convert
-  // it here. Confirmed by directly testing the driver's actual output,
-  // not assumed.
   return rows.map((r) => ({
     ...r,
     pm_score: r.pm_score !== null ? Number(r.pm_score) : null,
@@ -136,8 +128,6 @@ export async function getHeroStats(): Promise<HeroStats> {
       (SELECT COUNT(DISTINCT wallet) FROM trader_leaderboard_snapshots) AS total_traders,
       (SELECT MAX(fetched_at) FROM market_snapshots) AS last_updated
   `;
-  // COUNT() returns BIGINT, which the driver also returns as a string
-  // (same reasoning as pm_score above — confirmed by direct testing).
   return {
     ...row,
     total_markets: Number(row.total_markets),
