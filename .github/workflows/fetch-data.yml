@@ -6,7 +6,7 @@ on:
     # sane on Supabase's free tier while still building real history
     # over time. Bump back to every 4-6 hours later once there's a
     # reason to need finer-grained intraday snapshots.
-    - cron: "0 13 * * *"  # 13:00 UTC = 9am Eastern
+    - cron: "0 11 * * *"  # 11:00 UTC = 7am Eastern (EDT)
   workflow_dispatch: {}  # lets you trigger it manually from the GitHub UI
 
 jobs:
