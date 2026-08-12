@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import Nav from "@/components/Nav";
 import CopyableWallet from "@/components/CopyableWallet";
 import { getTraderStats, getTraderPositions, resolveWallet } from "@/lib/queries";
@@ -34,10 +34,10 @@ export default async function TraderPage({
         <Nav />
         <section className="max-w-3xl mx-auto px-6 py-20 text-center">
           <p className="font-[family-name:var(--font-display)] text-3xl text-parchment mb-4">
-            No trader found for "{decodeURIComponent(rawParam)}"
+            No trader found for &quot;{decodeURIComponent(rawParam)}&quot;
           </p>
           <p className="text-muted mb-8">
-            We only track wallets that have appeared on Polymarket's
+            We only track wallets that have appeared on Polymarket&apos;s
             top-25 leaderboard so far. Try a wallet address, or browse
             the full leaderboard below.
           </p>
@@ -65,8 +65,8 @@ export default async function TraderPage({
             No data for this wallet yet
           </p>
           <p className="text-muted mb-8">
-            This wallet isn't currently on Polymarket's top-25
-            leaderboard, so we don't have position data for it.
+            This wallet isn&apos;t currently on Polymarket&apos;s top-25
+            leaderboard, so we don&apos;t have position data for it.
           </p>
           <Link href="/leaderboard" className="text-accent hover:underline">
             View the leaderboard --&gt;
@@ -76,21 +76,22 @@ export default async function TraderPage({
     );
   }
 
-  const resolvedPositions = positions.filter((p) => p.realized_pnl !== null && p.realized_pnl !== 0);
-  const winCount = resolvedPositions.filter((p) => (p.realized_pnl ?? 0) > 0).length;
-  const lossCount = resolvedPositions.filter((p) => (p.realized_pnl ?? 0) <= 0).length;
-  const winPct = resolvedPositions.length > 0 ? (winCount / resolvedPositions.length) * 100 : 0;
+  // getTraderPositions already returns exactly the resolved-last-30-days
+  // set that PM Score is computed from -- no separate filtering needed
+  // here anymore, the two are guaranteed to match.
+  const winCount = positions.filter((p) => (p.realized_pnl ?? 0) > 0).length;
+  const lossCount = positions.filter((p) => (p.realized_pnl ?? 0) <= 0).length;
+  const winPct = positions.length > 0 ? (winCount / positions.length) * 100 : 0;
 
+  // Same normalization the SQL formula uses, mirrored here for the
+  // component breakdown display
   const edgeNormalized =
     stats.avg_edge_pct !== null
       ? Math.min(Math.max((stats.avg_edge_pct + 100) / 200, 0), 1)
       : null;
-  const consistency =
-    stats.avg_edge_pct !== null && stats.pnl_stddev !== null
-      ? Math.min(
-          Math.max(1 - stats.pnl_stddev / (Math.abs(stats.avg_edge_pct) + 1), 0),
-          1
-        )
+  const calibrationNormalized =
+    stats.calibration_edge !== null
+      ? Math.min(Math.max(stats.calibration_edge + 0.5, 0), 1)
       : null;
   const sampleFactor = Math.min(stats.position_count / 30, 1);
 
@@ -102,6 +103,7 @@ export default async function TraderPage({
           --&gt; Back to leaderboard
         </Link>
 
+        {/* Header */}
         <div className="mt-6 flex items-start justify-between flex-wrap gap-6">
           <div>
             <h1 className="font-[family-name:var(--font-display)] text-4xl text-parchment mb-2">
@@ -127,6 +129,7 @@ export default async function TraderPage({
           )}
         </div>
 
+        {/* Stat cards */}
         <div className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="border border-hairline rounded-lg p-5">
             <p className="text-xs uppercase tracking-wide text-muted mb-2">Total PnL</p>
@@ -152,13 +155,14 @@ export default async function TraderPage({
             </p>
           </div>
           <div className="border border-hairline rounded-lg p-5">
-            <p className="text-xs uppercase tracking-wide text-muted mb-2">Resolved / total positions</p>
+            <p className="text-xs uppercase tracking-wide text-muted mb-2">Positions (90d)</p>
             <p className="font-[family-name:var(--font-display)] text-2xl text-parchment">
-              {stats.position_count} / {positions.length}
+              {stats.position_count}
             </p>
           </div>
         </div>
 
+        {/* PM Score breakdown */}
         <div className="mt-16">
           <div className="flex items-baseline justify-between mb-6">
             <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment">
@@ -176,7 +180,7 @@ export default async function TraderPage({
             <div className="space-y-5">
               <ScoreRow label="Win rate" weight="40%" value={stats.win_rate} />
               <ScoreRow label="Average edge (normalized)" weight="35%" value={edgeNormalized} />
-              <ScoreRow label="Consistency" weight="25%" value={consistency} />
+              <ScoreRow label="Calibration edge" weight="25%" value={calibrationNormalized} />
               <ScoreRow label="Sample-size factor" weight="multiplier" value={sampleFactor} />
             </div>
           ) : (
@@ -187,7 +191,8 @@ export default async function TraderPage({
           )}
         </div>
 
-        {resolvedPositions.length > 0 && (
+        {/* Win/loss split -- resolved positions only, see note above */}
+        {positions.length > 0 && (
           <div className="mt-16">
             <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mb-6">
               Position outcomes (resolved only)
@@ -203,12 +208,13 @@ export default async function TraderPage({
           </div>
         )}
 
+        {/* Positions table */}
         <div className="mt-16">
           <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mb-6">
-            All positions
+            All positions (last 90 days)
           </h2>
           {positions.length === 0 ? (
-            <p className="text-sm text-muted">No position data for this wallet.</p>
+            <p className="text-sm text-muted">No positions resolved in the last 90 days for this wallet.</p>
           ) : (
             <div>
               <div className="grid grid-cols-[1fr_80px_90px_90px_100px_90px] gap-4 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
@@ -220,14 +226,13 @@ export default async function TraderPage({
                 <span className="text-right">Return</span>
               </div>
               {positions.map((p) => {
-                const resolved = p.cur_price !== null && (p.cur_price >= 0.98 || p.cur_price <= 0.02);
                 return (
                   <div key={p.condition_id}
                     className="grid grid-cols-[1fr_80px_90px_90px_100px_90px] items-center gap-4 py-3 border-b border-hairline"
                   >
                     <div>
                       <p className="text-sm text-parchment truncate">{p.market_title || "--"}</p>
-                      <p className="text-xs text-muted mt-0.5">{resolved ? "Resolved" : "Open"}</p>
+                      <p className="text-xs text-muted mt-0.5">Resolved</p>
                     </div>
                     <span className="font-mono text-xs text-muted text-right">{p.outcome || "--"}</span>
                     <span className="font-mono text-xs text-muted text-right">
@@ -237,16 +242,16 @@ export default async function TraderPage({
                       {p.cur_price !== null ? `${(p.cur_price * 100).toFixed(0)}c` : "--"}
                     </span>
                     <span className={`font-mono text-xs text-right ${
-                        (p.cash_pnl ?? 0) >= 0 ? "text-signal-yes" : "text-signal-no"
+                        (p.realized_pnl ?? 0) >= 0 ? "text-signal-yes" : "text-signal-no"
                       }`}
                     >
-                      {formatMoney(p.cash_pnl)}
+                      {formatMoney(p.realized_pnl)}
                     </span>
                     <span className={`font-mono text-xs text-right ${
-                        (p.percent_realized_pnl ?? 0) >= 0 ? "text-signal-yes" : "text-signal-no"
+                        (p.percent_return_approx ?? 0) >= 0 ? "text-signal-yes" : "text-signal-no"
                       }`}
                     >
-                      {p.percent_realized_pnl !== null ? `${p.percent_realized_pnl.toFixed(0)}%` : "--"}
+                      {p.percent_return_approx !== null ? `${p.percent_return_approx.toFixed(0)}%` : "--"}
                     </span>
                   </div>
                 );
@@ -283,4 +288,3 @@ function ScoreRow({
     </div>
   );
 }
-

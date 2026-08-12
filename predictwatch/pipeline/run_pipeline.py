@@ -224,11 +224,29 @@ def run():
     except Exception as e:
         print(f"Polymarket fetch failed: {e}")
 
+    # Recently-resolved markets - this is the only path by which the
+    # `result` field ever gets populated. Without this, market_snapshots
+    # only ever holds open/active markets, and the accuracy leaderboard
+    # would have nothing real to compute from.
+    try:
+        kalshi_resolved = fetch_kalshi.run_resolved(days=2)
+        print(f"Kalshi resolved: {len(kalshi_resolved)} markets")
+        all_rows.extend(kalshi_resolved)
+    except Exception as e:
+        print(f"Kalshi resolved-markets fetch failed: {e}")
+
+    try:
+        poly_resolved = fetch_polymarket.run_resolved(days=2)
+        print(f"Polymarket resolved: {len(poly_resolved)} markets")
+        all_rows.extend(poly_resolved)
+    except Exception as e:
+        print(f"Polymarket resolved-markets fetch failed: {e}")
+
     if all_rows:
         save_to_supabase(all_rows)
         print(f"Saved {len(all_rows)} rows to Supabase")
     else:
-        print("No rows fetched -- nothing saved.")
+        print("No rows fetched - nothing saved.")
 
     try:
         leaderboard_rows = fetch_polymarket_leaderboard.run()

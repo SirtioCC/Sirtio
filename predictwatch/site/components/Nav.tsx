@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import TraderSearch from "@/components/TraderSearch";
 
 export default function Nav() {
@@ -12,6 +12,9 @@ export default function Nav() {
         <div className="flex items-center gap-8 text-sm text-muted shrink-0">
           <Link href="/markets" className="hover:text-parchment transition-colors">
             Markets
+          </Link>
+          <Link href="/accuracy" className="hover:text-parchment transition-colors">
+            Accuracy
           </Link>
           <Link href="/leaderboard" className="hover:text-parchment transition-colors">
             Traders

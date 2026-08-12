@@ -1,4 +1,4 @@
-﻿import Link from "next/link";
+import Link from "next/link";
 import Nav from "@/components/Nav";
 
 export default function MethodologyPage() {
@@ -81,25 +81,42 @@ export default function MethodologyPage() {
               <p className="font-mono text-sm text-accent">35%</p>
             </div>
             <p className="text-sm text-muted leading-relaxed">
-              Mean return per resolved position. A trader who wins
-              small and loses big can have a good win rate and still be
-              a bad bet -- average edge catches that. Normalized to a
-              0-1 scale before weighting, so one extreme outlier trade
-              can't single-handedly dominate the score.
+              Mean percent return per resolved position. A trader who
+              wins small and loses big can have a good win rate and
+              still be a bad bet -- average edge catches that.
+              Normalized to a 0-1 scale before weighting, so one
+              extreme outlier trade can't single-handedly dominate the
+              score.
             </p>
           </div>
 
           <div className="border-t border-hairline pt-6">
             <div className="flex items-baseline justify-between mb-2">
-              <p className="text-parchment font-medium">Consistency</p>
+              <p className="text-parchment font-medium">Calibration edge</p>
               <p className="font-mono text-sm text-accent">25%</p>
             </div>
+            <p className="text-sm text-muted leading-relaxed mb-3">
+              The average gap between what actually happened and what
+              the trader paid to get in -- mean(outcome - entry price)
+              across every resolved position. This directly measures
+              "how much did this trader beat the market's own pricing,"
+              independent of whether the underlying bet was high or low
+              variance.
+            </p>
             <p className="text-sm text-muted leading-relaxed">
-              Derived from the standard deviation of returns across all
-              positions -- a lower spread scores higher. This is the
-              piece that specifically penalizes Trader A above: a
-              single huge swing looks bad here even if it happened to
-              pay off.
+              This replaced an earlier version of this component that
+              measured the variance of dollar returns instead. That
+              approach had a real, documented flaw: a trader holding 30
+              identical "obvious" 97c bets scored a perfect consistency
+              rating purely because their returns were all nearly
+              identical -- while a genuinely skilled trader who
+              correctly called 25 of 30 real coin-flips (inherently
+              high-variance in dollar terms, win or lose) scored
+              near-zero on that same component and lost the overall
+              comparison, 79.9 to 62.5, despite being the better
+              trader. Calibration edge fixes this: recomputed on the
+              same two traders, the skilled coin-flip trader now
+              correctly scores higher, 83.3 to 71.3.
             </p>
           </div>
 
@@ -142,9 +159,11 @@ export default function MethodologyPage() {
 
 win_rate = sum(entropy(p) for wins) / sum(entropy(p) for all positions)
 
+calibration_edge = mean(outcome - entry_price)   // outcome: 1 if won, 0 if lost
+
 score = (win_rate x 40)
       + (normalized_avg_edge x 35)
-      + (consistency x 25)
+      + (normalized_calibration_edge x 25)
 
 PM Score = score x min(resolved_positions / 30, 1)`}</pre>
         </div>
@@ -153,45 +172,42 @@ PM Score = score x min(resolved_positions / 30, 1)`}</pre>
           How to read your score
         </h2>
         <p className="text-sm text-muted leading-relaxed mb-6">
-          A truly breakeven trader with zero real edge -- 50% weighted win
-          rate, 0% average return -- doesn't score 50. They score{" "}
-          <strong className="text-parchment">37.5</strong>. Here's why: in
-          an efficient market, buying "Yes" at 60&cent; means winning 60% of
-          the time by definition, not by skill. Weight that by entropy and
-          average across a balanced set of trades, and a no-skill trader's
-          win rate converges to 50% purely by symmetry -- so 20 of the 40
-          win-rate points are "free," just for existing. The other two
-          components punish that trader hard: 0% edge gets half credit
-          (17.5 of 35), and consistency drops to <strong className="text-parchment">zero</strong>{" "}
-          -- prediction-market payouts are inherently binary, so without a
-          real, sizeable edge, the formula can't call anything
-          "consistent." <strong className="text-parchment">37.5 is the
-          mathematical floor for looking average.</strong> Real skill has
-          to clear that bar, not just cross 50.
+          A truly breakeven trader with zero real edge -- 50% weighted
+          win rate, 0% average return, 0 calibration edge -- scores
+          exactly <strong className="text-parchment">50</strong>. That's
+          intentional: each component is built so a genuinely neutral
+          trader lands at its midpoint (20 of 40 win-rate points, 17.5
+          of 35 edge points, 12.5 of 25 calibration points), so the
+          center of the scale means "average," the same way it reads on
+          a school grading curve.{" "}
+          <strong className="text-parchment">
+            50 is the mathematical center. Real skill has to clear it,
+            not just approach it.
+          </strong>
         </p>
 
         <div className="flex h-3 rounded-full overflow-hidden mb-3">
-          <div className="bg-signal-no" style={{ width: "25%" }} />
+          <div className="bg-signal-no" style={{ width: "35%" }} />
           <div className="bg-hairline" style={{ width: "15%" }} />
-          <div className="bg-accent" style={{ width: "20%" }} />
-          <div className="bg-signal-yes opacity-60" style={{ width: "20%" }} />
+          <div className="bg-accent" style={{ width: "15%" }} />
+          <div className="bg-signal-yes opacity-60" style={{ width: "15%" }} />
           <div className="bg-signal-yes" style={{ width: "20%" }} />
         </div>
         <div className="grid grid-cols-5 gap-2 text-xs text-muted mb-12">
           <div>
-            <p className="text-parchment font-medium">0-25</p>
+            <p className="text-parchment font-medium">0-35</p>
             <p>Losing</p>
           </div>
           <div>
-            <p className="text-parchment font-medium">25-40</p>
+            <p className="text-parchment font-medium">35-50</p>
             <p>Around breakeven</p>
           </div>
           <div>
-            <p className="text-parchment font-medium">40-60</p>
+            <p className="text-parchment font-medium">50-65</p>
             <p>Real edge</p>
           </div>
           <div>
-            <p className="text-parchment font-medium">60-80</p>
+            <p className="text-parchment font-medium">65-80</p>
             <p>Strong</p>
           </div>
           <div>
@@ -204,37 +220,37 @@ PM Score = score x min(resolved_positions / 30, 1)`}</pre>
           <div className="border border-hairline rounded-lg p-5">
             <div className="flex items-baseline justify-between mb-3">
               <p className="text-parchment font-medium">Bad trader</p>
-              <p className="font-mono text-xl text-signal-no">24.5</p>
+              <p className="font-mono text-xl text-signal-no">33.2</p>
             </div>
             <p className="text-xs text-muted font-mono">
-              35% win rate &middot; -40% avg edge &middot; 60% stdev
+              35% win rate &middot; -40% avg edge &middot; -0.15 calibration
             </p>
           </div>
           <div className="border border-hairline rounded-lg p-5">
             <div className="flex items-baseline justify-between mb-3">
               <p className="text-parchment font-medium">Breakeven trader</p>
-              <p className="font-mono text-xl text-muted">37.5</p>
+              <p className="font-mono text-xl text-muted">50.0</p>
             </div>
             <p className="text-xs text-muted font-mono">
-              50% win rate &middot; 0% avg edge &middot; 80% stdev
+              50% win rate &middot; 0% avg edge &middot; 0.0 calibration
             </p>
           </div>
           <div className="border border-hairline rounded-lg p-5">
             <div className="flex items-baseline justify-between mb-3">
               <p className="text-parchment font-medium">Good trader</p>
-              <p className="font-mono text-xl text-accent">59.7</p>
+              <p className="font-mono text-xl text-accent">61.8</p>
             </div>
             <p className="text-xs text-muted font-mono">
-              60% win rate &middot; +30% avg edge &middot; 15% stdev
+              60% win rate &middot; +30% avg edge &middot; 0.10 calibration
             </p>
           </div>
           <div className="border border-hairline rounded-lg p-5">
             <div className="flex items-baseline justify-between mb-3">
               <p className="text-parchment font-medium">Elite trader</p>
-              <p className="font-mono text-xl text-signal-yes">74.8</p>
+              <p className="font-mono text-xl text-signal-yes">75.5</p>
             </div>
             <p className="text-xs text-muted font-mono">
-              75% win rate &middot; +60% avg edge &middot; 20% stdev
+              75% win rate &middot; +60% avg edge &middot; 0.20 calibration
             </p>
           </div>
         </div>
@@ -245,8 +261,8 @@ PM Score = score x min(resolved_positions / 30, 1)`}</pre>
           actual Polymarket traders yet, since that requires more
           accumulated history than the site has today. Once there's
           enough data across enough traders, the better long-term approach
-          is switching to percentile-based bands ("top 10% of tracked
-          traders") instead of these fixed cutoffs, since that
+          is switching to percentile-based bands (&quot;top 10% of tracked
+          traders&quot;) instead of these fixed cutoffs, since that
           self-calibrates to reality instead of resting on assumed inputs.
         </p>
 
@@ -283,29 +299,31 @@ PM Score = score x min(resolved_positions / 30, 1)`}</pre>
               all obvious bets, or all coin-flips -- the weighting can't
               tell those portfolios apart on win rate alone, since
               weighting a uniform set of outcomes by a constant changes
-              nothing. Average edge (the return-magnitude component)
-              is what catches that case instead: an all-obvious-wins
-              portfolio nets tiny returns, an all-coin-flip-wins
-              portfolio nets large ones, even at an identical win rate.
+              nothing. Average edge and calibration edge both still
+              catch that case independently, though: an all-obvious-wins
+              portfolio nets tiny returns and tiny calibration edge, an
+              all-coin-flip-wins portfolio nets large ones on both,
+              even at an identical win rate.
             </span>
           </li>
           <li className="flex gap-3">
             <span className="text-signal-no mt-1">-</span>
             <span>
               <strong className="text-parchment">
-                Consistency can still favor "safe" traders.
+                Calibration edge can't separately catch an erratic trader.
               </strong>{" "}
-              Even with entropy-weighted win rate, the consistency
-              component (25% weight) rewards low-variance returns --
-              and genuine coin-flip betting is inherently higher
-              variance than sticking to safe favorites, even when the
-              trader is actually good at reading close calls. A steady
-              stream of small, obvious wins can currently out-score a
-              genuinely skilled coin-flip trader through this
-              component. Properly fixing this likely means moving to
-              a calibration-based score (e.g. Brier or log score)
-              instead of a variance-based one -- a bigger change, not
-              done yet.
+              It's a mean, not a variance -- a trader who's wildly
+              overconfident on some bets and wildly underconfident on
+              others could still average out to a near-zero (neutral)
+              calibration edge, even though neither extreme reflects
+              real skill. We deliberately did not add a variance
+              penalty on top of this to catch that case: tested it, and
+              it reintroduces the exact bias calibration edge was built
+              to remove, since genuine coin-flip betting is
+              structurally binary (a fixed +0.5 or -0.5 edge per bet)
+              and will always show high variance regardless of real
+              skill. This is a real, accepted tradeoff, not an
+              oversight.
             </span>
           </li>
           <li className="flex gap-3">
@@ -328,4 +346,3 @@ PM Score = score x min(resolved_positions / 30, 1)`}</pre>
     </div>
   );
 }
-
