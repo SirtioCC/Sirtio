@@ -16,6 +16,7 @@ import fetch_kalshi
 import fetch_polymarket
 import fetch_polymarket_leaderboard
 import fetch_polymarket_positions
+import fetch_polymarket_closed_positions
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS market_snapshots (
@@ -67,13 +68,27 @@ CREATE TABLE IF NOT EXISTS trader_positions_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_positions_wallet ON trader_positions_snapshots(wallet);
 CREATE INDEX IF NOT EXISTS idx_positions_fetched_at ON trader_positions_snapshots(fetched_at);
--- Current-state table, not a time series: one row per (wallet, market),
--- updated in place each run instead of appended. Without this, a single
--- wallet like the #1 leaderboard trader (150,000+ positions) would add
--- that many fresh rows on every scheduled run, forever. This unique
--- index is what ON CONFLICT below targets to make that possible.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_wallet_condition
     ON trader_positions_snapshots(wallet, condition_id);
+
+CREATE TABLE IF NOT EXISTS trader_closed_positions_snapshots (
+    id BIGSERIAL PRIMARY KEY,
+    wallet TEXT NOT NULL,
+    condition_id TEXT,
+    market_title TEXT,
+    outcome TEXT,
+    avg_price DOUBLE PRECISION,
+    cur_price DOUBLE PRECISION,
+    total_bought DOUBLE PRECISION,
+    realized_pnl DOUBLE PRECISION,
+    percent_return_approx DOUBLE PRECISION,
+    closed_at TIMESTAMPTZ,
+    end_date TEXT,
+    fetched_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_closed_positions_wallet ON trader_closed_positions_snapshots(wallet);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_closed_positions_wallet_condition
+    ON trader_closed_positions_snapshots(wallet, condition_id);
 """
 
 INSERT_SQL = """
@@ -108,6 +123,26 @@ ON CONFLICT (wallet, condition_id) DO UPDATE SET
     realized_pnl = EXCLUDED.realized_pnl,
     percent_realized_pnl = EXCLUDED.percent_realized_pnl,
     redeemable = EXCLUDED.redeemable,
+    end_date = EXCLUDED.end_date,
+    fetched_at = EXCLUDED.fetched_at
+"""
+
+CLOSED_POSITIONS_INSERT_SQL = """
+INSERT INTO trader_closed_positions_snapshots
+(wallet, condition_id, market_title, outcome, avg_price, cur_price,
+ total_bought, realized_pnl, percent_return_approx, closed_at, end_date, fetched_at)
+VALUES (%(wallet)s, %(condition_id)s, %(market_title)s, %(outcome)s, %(avg_price)s,
+        %(cur_price)s, %(total_bought)s, %(realized_pnl)s, %(percent_return_approx)s,
+        %(closed_at)s, %(end_date)s, %(fetched_at)s)
+ON CONFLICT (wallet, condition_id) DO UPDATE SET
+    market_title = EXCLUDED.market_title,
+    outcome = EXCLUDED.outcome,
+    avg_price = EXCLUDED.avg_price,
+    cur_price = EXCLUDED.cur_price,
+    total_bought = EXCLUDED.total_bought,
+    realized_pnl = EXCLUDED.realized_pnl,
+    percent_return_approx = EXCLUDED.percent_return_approx,
+    closed_at = EXCLUDED.closed_at,
     end_date = EXCLUDED.end_date,
     fetched_at = EXCLUDED.fetched_at
 """
@@ -161,6 +196,17 @@ def save_positions_to_supabase(rows):
         conn.close()
 
 
+def save_closed_positions_to_supabase(rows):
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA)
+            psycopg2.extras.execute_batch(cur, CLOSED_POSITIONS_INSERT_SQL, rows)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def run():
     all_rows = []
 
@@ -182,7 +228,7 @@ def run():
         save_to_supabase(all_rows)
         print(f"Saved {len(all_rows)} rows to Supabase")
     else:
-        print("No rows fetched — nothing saved.")
+        print("No rows fetched -- nothing saved.")
 
     try:
         leaderboard_rows = fetch_polymarket_leaderboard.run()
@@ -205,6 +251,17 @@ def run():
                 print(f"Saved {len(position_rows)} position rows to Supabase")
     except Exception as e:
         print(f"Polymarket positions fetch failed: {e}")
+
+    try:
+        if wallets:
+            print(f"Fetching closed positions for {len(wallets)} leaderboard wallets...")
+            closed_rows = fetch_polymarket_closed_positions.run(wallets)
+            print(f"Polymarket closed positions: {len(closed_rows)} rows across {len(wallets)} wallets")
+            if closed_rows:
+                save_closed_positions_to_supabase(closed_rows)
+                print(f"Saved {len(closed_rows)} closed position rows to Supabase")
+    except Exception as e:
+        print(f"Polymarket closed positions fetch failed: {e}")
 
 
 if __name__ == "__main__":

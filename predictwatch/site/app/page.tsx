@@ -125,7 +125,7 @@ export default async function Home() {
                   {getDisplayName(t.username, t.wallet)}
                 </p>
                 <p className="text-xs text-muted mt-1">
-                  {t.position_count} positions
+                  {t.position_count} resolved
                 </p>
               </div>
               <span className="font-mono text-sm text-signal-yes">
@@ -146,4 +146,5 @@ export default async function Home() {
     </div>
   );
 }
+
 

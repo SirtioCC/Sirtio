@@ -117,6 +117,21 @@ export default function MethodologyPage() {
               dominate the top of the board by chance alone.
             </p>
           </div>
+
+          <div className="border-t border-hairline pt-6">
+            <div className="flex items-baseline justify-between mb-2">
+              <p className="text-parchment font-medium">Rolling window</p>
+              <p className="font-mono text-sm text-accent">last 90 days</p>
+            </div>
+            <p className="text-sm text-muted leading-relaxed">
+              Only positions that resolved in the last 90 days count
+              toward the score. A deliberately conservative starting
+              point -- recent form only, until there's enough real
+              data flowing through the pipeline to trust widening it.
+              This will likely expand over time as more history
+              accumulates.
+            </p>
+          </div>
         </div>
 
         <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
@@ -133,6 +148,107 @@ score = (win_rate x 40)
 
 PM Score = score x min(resolved_positions / 30, 1)`}</pre>
         </div>
+
+        <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
+          How to read your score
+        </h2>
+        <p className="text-sm text-muted leading-relaxed mb-6">
+          A truly breakeven trader with zero real edge -- 50% weighted win
+          rate, 0% average return -- doesn't score 50. They score{" "}
+          <strong className="text-parchment">37.5</strong>. Here's why: in
+          an efficient market, buying "Yes" at 60&cent; means winning 60% of
+          the time by definition, not by skill. Weight that by entropy and
+          average across a balanced set of trades, and a no-skill trader's
+          win rate converges to 50% purely by symmetry -- so 20 of the 40
+          win-rate points are "free," just for existing. The other two
+          components punish that trader hard: 0% edge gets half credit
+          (17.5 of 35), and consistency drops to <strong className="text-parchment">zero</strong>{" "}
+          -- prediction-market payouts are inherently binary, so without a
+          real, sizeable edge, the formula can't call anything
+          "consistent." <strong className="text-parchment">37.5 is the
+          mathematical floor for looking average.</strong> Real skill has
+          to clear that bar, not just cross 50.
+        </p>
+
+        <div className="flex h-3 rounded-full overflow-hidden mb-3">
+          <div className="bg-signal-no" style={{ width: "25%" }} />
+          <div className="bg-hairline" style={{ width: "15%" }} />
+          <div className="bg-accent" style={{ width: "20%" }} />
+          <div className="bg-signal-yes opacity-60" style={{ width: "20%" }} />
+          <div className="bg-signal-yes" style={{ width: "20%" }} />
+        </div>
+        <div className="grid grid-cols-5 gap-2 text-xs text-muted mb-12">
+          <div>
+            <p className="text-parchment font-medium">0-25</p>
+            <p>Losing</p>
+          </div>
+          <div>
+            <p className="text-parchment font-medium">25-40</p>
+            <p>Around breakeven</p>
+          </div>
+          <div>
+            <p className="text-parchment font-medium">40-60</p>
+            <p>Real edge</p>
+          </div>
+          <div>
+            <p className="text-parchment font-medium">60-80</p>
+            <p>Strong</p>
+          </div>
+          <div>
+            <p className="text-parchment font-medium">80-100</p>
+            <p>Elite</p>
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-4 mb-6">
+          <div className="border border-hairline rounded-lg p-5">
+            <div className="flex items-baseline justify-between mb-3">
+              <p className="text-parchment font-medium">Bad trader</p>
+              <p className="font-mono text-xl text-signal-no">24.5</p>
+            </div>
+            <p className="text-xs text-muted font-mono">
+              35% win rate &middot; -40% avg edge &middot; 60% stdev
+            </p>
+          </div>
+          <div className="border border-hairline rounded-lg p-5">
+            <div className="flex items-baseline justify-between mb-3">
+              <p className="text-parchment font-medium">Breakeven trader</p>
+              <p className="font-mono text-xl text-muted">37.5</p>
+            </div>
+            <p className="text-xs text-muted font-mono">
+              50% win rate &middot; 0% avg edge &middot; 80% stdev
+            </p>
+          </div>
+          <div className="border border-hairline rounded-lg p-5">
+            <div className="flex items-baseline justify-between mb-3">
+              <p className="text-parchment font-medium">Good trader</p>
+              <p className="font-mono text-xl text-accent">59.7</p>
+            </div>
+            <p className="text-xs text-muted font-mono">
+              60% win rate &middot; +30% avg edge &middot; 15% stdev
+            </p>
+          </div>
+          <div className="border border-hairline rounded-lg p-5">
+            <div className="flex items-baseline justify-between mb-3">
+              <p className="text-parchment font-medium">Elite trader</p>
+              <p className="font-mono text-xl text-signal-yes">74.8</p>
+            </div>
+            <p className="text-xs text-muted font-mono">
+              75% win rate &middot; +60% avg edge &middot; 20% stdev
+            </p>
+          </div>
+        </div>
+
+        <p className="text-xs text-muted leading-relaxed mb-12">
+          These bands are derived analytically from the formula itself --
+          they haven't been validated against the real distribution of
+          actual Polymarket traders yet, since that requires more
+          accumulated history than the site has today. Once there's
+          enough data across enough traders, the better long-term approach
+          is switching to percentile-based bands ("top 10% of tracked
+          traders") instead of these fixed cutoffs, since that
+          self-calibrates to reality instead of resting on assumed inputs.
+        </p>
 
         <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
           What this doesn't do yet
@@ -212,3 +328,4 @@ PM Score = score x min(resolved_positions / 30, 1)`}</pre>
     </div>
   );
 }
+

@@ -79,7 +79,7 @@ export default async function LeaderboardPage() {
                   <div className="mt-1 flex items-center gap-2">
                     <CopyableWallet wallet={t.wallet} />
                     <span className="text-xs text-muted">
-                      . {t.position_count} positions
+                      . {t.position_count} resolved
                     </span>
                   </div>
                 </div>
@@ -103,4 +103,5 @@ export default async function LeaderboardPage() {
     </div>
   );
 }
+
 
