@@ -15,7 +15,23 @@ on:
     # Aug 13) with zero automatic runs -- workflow_dispatch (manual)
     # worked fine the whole time, which is the exact documented
     # top-of-hour symptom pattern, not a config/secret problem.
-    - cron: "17 11 * * *"  # ~11:17 UTC = ~7:17am Eastern (EDT)
+    #
+    # UPDATE 2026-08-16: moving off the hour did NOT fix it. Three
+    # consecutive days (Aug 14/15/16) all fired ~3h23-26m late,
+    # regardless of which cron value was set (13:00 UTC, then 11:00
+    # UTC, then 11:17 UTC all produced the same consistent delay) --
+    # ruling out both the top-of-hour theory and a stale-cron-cache
+    # theory. This looks like a genuine, structural scheduling delay
+    # specific to this account/repo that editing the cron value alone
+    # doesn't fix. workflow_dispatch (manual) has fired instantly and
+    # correctly every time throughout, confirming the workflow itself
+    # is fine -- only the schedule trigger is affected.
+    #
+    # Compensating by ~3h25m so the ACTUAL run lands near 7am Eastern,
+    # until this can be replaced with an external trigger (hitting
+    # workflow_dispatch on a real schedule from outside GitHub) instead
+    # of continuing to depend on GitHub's own scheduler for this repo.
+    - cron: "35 7 * * *"  # 07:35 UTC nominal -> actual run expected ~7am Eastern given the confirmed ~3h25m delay
   workflow_dispatch: {}  # lets you trigger it manually from the GitHub UI
 
 jobs:
