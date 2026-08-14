@@ -9,13 +9,21 @@ import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 // methodology's formula section. Sample-size damping only ever pulls
 // a score DOWN from there, never up, so these bands are read directly
 // against the final (already-damped) score shown on the page.
-function scoreTier(score: number | null): string | null {
-  if (score === null) return null;
-  if (score >= 80) return "Elite";
-  if (score >= 65) return "Great";
-  if (score >= 55) return "Good";
-  if (score >= 45) return "Break even";
-  if (score >= 25) return "Below average";
+// Tier cutoffs anchored to z_score, not the raw 0-100 score -- Z is
+// the real statistic (skill above/below average in posterior-
+// uncertainty units); the 0-100 number is just a display transform of
+// it via a logistic k that gets re-calibrated from real data every
+// pipeline run and will drift slightly over time. Z-based cutoffs stay
+// meaningful even as k shifts; score-based cutoffs would need constant
+// re-tuning. Set 2026-08-14 against the first real run's output
+// (67 scored wallets) -- see sirtio_score.py for the full derivation.
+function scoreTier(zScore: number | null): string | null {
+  if (zScore === null) return null;
+  if (zScore >= 6) return "Elite";
+  if (zScore >= 3) return "Great";
+  if (zScore >= 1) return "Good";
+  if (zScore >= -1) return "Break even";
+  if (zScore >= -3) return "Below average";
   return "Poor";
 }
 
@@ -93,9 +101,9 @@ export default async function LeaderboardPage() {
                   <span className="font-mono text-sm text-signal-yes">
                     {t.pm_score !== null ? t.pm_score.toFixed(1) : "--"}
                   </span>
-                  {scoreTier(t.pm_score) && (
+                  {scoreTier(t.z_score) && (
                     <p className="text-xs text-muted mt-0.5">
-                      {scoreTier(t.pm_score)}
+                      {scoreTier(t.z_score)}
                     </p>
                   )}
                 </div>

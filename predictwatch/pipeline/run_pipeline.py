@@ -19,6 +19,7 @@ import fetch_polymarket_leaderboard
 import fetch_polymarket_closed_positions
 import fetch_polymarket_activity
 import realized_pnl
+import sirtio_score
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS market_snapshots (
@@ -40,7 +41,19 @@ CREATE TABLE IF NOT EXISTS market_snapshots (
 -- market_snapshots already existed before slug was added -- CREATE TABLE
 -- IF NOT EXISTS above is a no-op against it, so add the column explicitly.
 ALTER TABLE market_snapshots ADD COLUMN IF NOT EXISTS slug TEXT;
-CREATE INDEX IF NOT EXISTS idx_source_extid ON market_snapshots(source, external_id);
+-- Switched from append-only (a new row every run, forever) to one row
+-- per market, upserted in place -- 2026-08-14. Nothing on the site
+-- reads historical snapshots (getTopMarkets only ever reads the latest
+-- row per market), so every prior snapshot was pure unused storage
+-- growth: 979K rows and climbing before this fix, purely from running
+-- daily with no cap. Requires a ONE-TIME manual cleanup in Supabase
+-- first (see migration note in this file's changelog/PR) to dedupe
+-- existing rows before this unique index can be created -- a table
+-- with existing duplicate (source, external_id) pairs will fail this
+-- CREATE UNIQUE INDEX outright, breaking every pipeline run until the
+-- cleanup is done.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_market_snapshots_unique
+    ON market_snapshots(source, external_id);
 CREATE INDEX IF NOT EXISTS idx_fetched_at ON market_snapshots(fetched_at);
 
 CREATE TABLE IF NOT EXISTS trader_leaderboard_snapshots (
@@ -127,6 +140,35 @@ CREATE TABLE IF NOT EXISTS wallet_open_ledger (
     positions_json JSONB NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
+
+-- Sirtio Score v2 (Bayesian shrinkage + Z-score) -- one row per wallet,
+-- computed once per pipeline run by sirtio_score.py against the full
+-- 90-day ledger, not live SQL per page load. The site reads this table
+-- directly instead of deriving the score itself.
+CREATE TABLE IF NOT EXISTS trader_sirtio_scores (
+    wallet TEXT PRIMARY KEY,
+    position_count INTEGER NOT NULL,
+    avg_edge_pct DOUBLE PRECISION,
+    shrunk_edge_pct DOUBLE PRECISION,
+    z_score DOUBLE PRECISION,
+    realized_pnl_90d DOUBLE PRECISION,
+    sirtio_score DOUBLE PRECISION,
+    computed_at TIMESTAMPTZ NOT NULL
+);
+
+-- One row per pipeline run -- lets us watch mu/sigma2/tau2/k drift over
+-- time as the wallet pool and their real track records change, and is
+-- the actual source for picking real tier cutoffs (Elite/Great/etc.)
+-- off real output instead of guessing.
+CREATE TABLE IF NOT EXISTS sirtio_score_population_stats (
+    id BIGSERIAL PRIMARY KEY,
+    mu DOUBLE PRECISION,
+    sigma2 DOUBLE PRECISION,
+    tau2 DOUBLE PRECISION,
+    k DOUBLE PRECISION,
+    n_wallets INTEGER,
+    computed_at TIMESTAMPTZ NOT NULL
+);
 """
 
 INSERT_SQL = """
@@ -136,6 +178,18 @@ INSERT INTO market_snapshots
 VALUES (%(source)s, %(external_id)s, %(slug)s, %(title)s, %(category)s, %(yes_price_cents)s,
         %(no_price_cents)s, %(volume)s, %(open_interest)s, %(status)s,
         %(close_time)s, %(result)s, %(fetched_at)s)
+ON CONFLICT (source, external_id) DO UPDATE SET
+    slug = EXCLUDED.slug,
+    title = EXCLUDED.title,
+    category = EXCLUDED.category,
+    yes_price_cents = EXCLUDED.yes_price_cents,
+    no_price_cents = EXCLUDED.no_price_cents,
+    volume = EXCLUDED.volume,
+    open_interest = EXCLUDED.open_interest,
+    status = EXCLUDED.status,
+    close_time = EXCLUDED.close_time,
+    result = EXCLUDED.result,
+    fetched_at = EXCLUDED.fetched_at
 """
 
 LEADERBOARD_INSERT_SQL = """
@@ -369,6 +423,49 @@ def save_wallet_open_ledger(new_open_positions: dict, processed_wallets: list):
         conn.close()
 
 
+def save_sirtio_scores(results: list, pop_stats: dict):
+    if not results:
+        return
+    now_iso = datetime.now(timezone.utc).isoformat()
+    rows = [{**r, "computed_at": now_iso} for r in results]
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA)
+            psycopg2.extras.execute_batch(
+                cur,
+                """
+                INSERT INTO trader_sirtio_scores
+                (wallet, position_count, avg_edge_pct, shrunk_edge_pct,
+                 z_score, realized_pnl_90d, sirtio_score, computed_at)
+                VALUES (%(wallet)s, %(position_count)s, %(avg_edge_pct)s,
+                        %(shrunk_edge_pct)s, %(z_score)s, %(realized_pnl_90d)s,
+                        %(sirtio_score)s, %(computed_at)s)
+                ON CONFLICT (wallet) DO UPDATE SET
+                    position_count = EXCLUDED.position_count,
+                    avg_edge_pct = EXCLUDED.avg_edge_pct,
+                    shrunk_edge_pct = EXCLUDED.shrunk_edge_pct,
+                    z_score = EXCLUDED.z_score,
+                    realized_pnl_90d = EXCLUDED.realized_pnl_90d,
+                    sirtio_score = EXCLUDED.sirtio_score,
+                    computed_at = EXCLUDED.computed_at
+                """,
+                rows,
+            )
+            cur.execute(
+                """
+                INSERT INTO sirtio_score_population_stats
+                (mu, sigma2, tau2, k, n_wallets, computed_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (pop_stats["mu"], pop_stats["sigma2"], pop_stats["tau2"],
+                 pop_stats["k"], pop_stats["n_wallets"], now_iso),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def run():
     all_rows = []
 
@@ -493,6 +590,30 @@ def run():
                       f"(next run will only fetch activity newer than this)")
     except Exception as e:
         print(f"Polymarket trade-level realized PnL fetch failed: {e}")
+
+    # Sirtio Score v2 (Bayesian shrinkage + Z-score) -- runs against the
+    # FULL current 90-day ledger in Supabase, independent of what this
+    # specific run fetched (population stats need to reflect every
+    # tracked wallet, not just ones with new activity today). See
+    # sirtio_score.py for the full derivation.
+    try:
+        print("Computing Sirtio Score (Bayesian shrinkage + Z-score) "
+              "from the full realized-PnL ledger...")
+        conn = get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(SCHEMA)
+            results, pop_stats = sirtio_score.run(conn)
+        finally:
+            conn.close()
+        print(f"  mu={pop_stats['mu']:.2f}  sigma2={pop_stats['sigma2']:.1f}  "
+              f"tau2={pop_stats['tau2']:.2f}  k={pop_stats['k']:.4f}  "
+              f"across {pop_stats['n_wallets']} wallets")
+        if results:
+            save_sirtio_scores(results, pop_stats)
+            print(f"Saved {len(results)} Sirtio Scores to Supabase")
+    except Exception as e:
+        print(f"Sirtio Score computation failed: {e}")
 
 
 if __name__ == "__main__":

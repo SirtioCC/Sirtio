@@ -24,6 +24,7 @@ export type LeaderboardTrader = {
   realized_pnl_90d: number | null;
   position_count: number;
   avg_edge_pct: number | null;
+  z_score: number | null;
   pm_score: number | null;
 };
 
@@ -95,62 +96,43 @@ export async function getTopMarkets(limit = 20): Promise<Market[]> {
  * events," and keeps avg_edge_pct a true per-position return rather
  * than being skewed toward wallets who happened to exit in more pieces.
  */
+/**
+ * Sirtio Score v2, 2026-08-14 -- Bayesian-shrunk, risk-adjusted mean
+ * return, replacing the old live-SQL edge+magnitude+multiplier formula.
+ * Computed ONCE PER PIPELINE RUN in Python (see sirtio_score.py),
+ * against the full 90-day realized-PnL ledger, and stored in
+ * trader_sirtio_scores -- this function just reads the precomputed
+ * result, it does not compute the score itself. See sirtio_score.py
+ * for the full derivation (empirical Bayes shrinkage + a Bayesian
+ * analog of a Sharpe ratio / t-statistic, squashed to 0-100 via a
+ * logistic curve). z_score is the underlying statistic tier cutoffs
+ * are set against -- see scoreTier() in the leaderboard page.
+ */
 export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
   const rows = await sql<LeaderboardTrader[]>`
     WITH latest_leaderboard AS (
       SELECT * FROM trader_leaderboard_snapshots
       WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
-    ),
-    per_position AS (
-      SELECT
-        wallet,
-        condition_id,
-        SUM(realized_pnl) AS position_pnl,
-        SUM(avg_cost * size) AS position_cost_basis
-      FROM trader_realized_pnl_events
-      WHERE closed_at IS NOT NULL
-        AND closed_at >= (NOW() - INTERVAL '90 days')
-      GROUP BY wallet, condition_id
-    ),
-    position_stats AS (
-      SELECT
-        wallet,
-        COUNT(*) AS position_count,
-        AVG(CASE WHEN position_cost_basis > 0 THEN (position_pnl / position_cost_basis) * 100 END) AS avg_edge_pct,
-        SUM(position_pnl) AS realized_pnl_90d
-      FROM per_position
-      GROUP BY wallet
     )
     SELECT
       l.rank,
       l.wallet,
       l.username,
       l.volume,
-      COALESCE(p.realized_pnl_90d, 0) AS realized_pnl_90d,
-      COALESCE(p.position_count, 0) AS position_count,
-      p.avg_edge_pct,
-      CASE
-        WHEN p.position_count IS NULL OR p.position_count = 0 THEN NULL
-        ELSE ROUND(
-          (
-            (
-              (LEAST(GREATEST((COALESCE(p.avg_edge_pct, 0) + 100) / 200.0, 0), 1) * 50)
-              + (LEAST(GREATEST(
-                  (SIGN(COALESCE(p.realized_pnl_90d, 0)) * LN(1 + ABS(COALESCE(p.realized_pnl_90d, 0))) + 20) / 40.0,
-                  0), 1) * 50)
-            )
-            * LEAST(p.position_count / 30.0, 1.0)
-          )::numeric,
-          1
-        )
-      END AS pm_score
+      COALESCE(s.realized_pnl_90d, 0) AS realized_pnl_90d,
+      COALESCE(s.position_count, 0) AS position_count,
+      s.avg_edge_pct,
+      s.z_score,
+      s.sirtio_score AS pm_score
     FROM latest_leaderboard l
-    LEFT JOIN position_stats p ON p.wallet = l.wallet
-    ORDER BY pm_score DESC NULLS LAST, l.rank ASC
+    LEFT JOIN trader_sirtio_scores s ON s.wallet = l.wallet
+    ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC
     LIMIT ${limit}
   `;
   return rows.map((r) => ({
     ...r,
+    avg_edge_pct: r.avg_edge_pct !== null ? Number(r.avg_edge_pct) : null,
+    z_score: r.z_score !== null ? Number(r.z_score) : null,
     pm_score: r.pm_score !== null ? Number(r.pm_score) : null,
   }));
 }
@@ -181,6 +163,7 @@ export type TraderDetail = {
   realized_pnl_90d: number | null;
   position_count: number;
   avg_edge_pct: number | null;
+  z_score: number | null;
   pm_score: number | null;
 };
 
@@ -203,52 +186,19 @@ export async function getTraderStats(wallet: string): Promise<TraderDetail | nul
       SELECT * FROM trader_leaderboard_snapshots
       WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
     ),
-    per_position AS (
-      SELECT
-        wallet,
-        condition_id,
-        SUM(realized_pnl) AS position_pnl,
-        SUM(avg_cost * size) AS position_cost_basis
-      FROM trader_realized_pnl_events
-      WHERE closed_at IS NOT NULL
-        AND closed_at >= (NOW() - INTERVAL '90 days')
-      GROUP BY wallet, condition_id
-    ),
-    position_stats AS (
-      SELECT
-        wallet,
-        COUNT(*) AS position_count,
-        AVG(CASE WHEN position_cost_basis > 0 THEN (position_pnl / position_cost_basis) * 100 END) AS avg_edge_pct,
-        SUM(position_pnl) AS realized_pnl_90d
-      FROM per_position
-      GROUP BY wallet
-    ),
     scored AS (
       SELECT
         l.wallet,
         l.username,
         l.rank AS polymarket_rank,
         l.volume,
-        COALESCE(p.realized_pnl_90d, 0) AS realized_pnl_90d,
-        COALESCE(p.position_count, 0) AS position_count,
-        p.avg_edge_pct,
-        CASE
-          WHEN p.position_count IS NULL OR p.position_count = 0 THEN NULL
-          ELSE ROUND(
-            (
-              (
-                (LEAST(GREATEST((COALESCE(p.avg_edge_pct, 0) + 100) / 200.0, 0), 1) * 50)
-                + (LEAST(GREATEST(
-                    (SIGN(COALESCE(p.realized_pnl_90d, 0)) * LN(1 + ABS(COALESCE(p.realized_pnl_90d, 0))) + 20) / 40.0,
-                    0), 1) * 50)
-              )
-              * LEAST(p.position_count / 30.0, 1.0)
-            )::numeric,
-            1
-          )
-        END AS pm_score
+        COALESCE(s.realized_pnl_90d, 0) AS realized_pnl_90d,
+        COALESCE(s.position_count, 0) AS position_count,
+        s.avg_edge_pct,
+        s.z_score,
+        s.sirtio_score AS pm_score
       FROM latest_leaderboard l
-      LEFT JOIN position_stats p ON p.wallet = l.wallet
+      LEFT JOIN trader_sirtio_scores s ON s.wallet = l.wallet
     ),
     ranked AS (
       SELECT
@@ -256,13 +206,18 @@ export async function getTraderStats(wallet: string): Promise<TraderDetail | nul
         ROW_NUMBER() OVER (ORDER BY pm_score DESC NULLS LAST, polymarket_rank ASC) AS rank
       FROM scored
     )
-    SELECT wallet, username, rank, volume, realized_pnl_90d, position_count, avg_edge_pct, pm_score
+    SELECT wallet, username, rank, volume, realized_pnl_90d, position_count, avg_edge_pct, z_score, pm_score
     FROM ranked
     WHERE wallet = ${wallet}
   `;
   if (rows.length === 0) return null;
   const r = rows[0];
-  return { ...r, pm_score: r.pm_score !== null ? Number(r.pm_score) : null };
+  return {
+    ...r,
+    avg_edge_pct: r.avg_edge_pct !== null ? Number(r.avg_edge_pct) : null,
+    z_score: r.z_score !== null ? Number(r.z_score) : null,
+    pm_score: r.pm_score !== null ? Number(r.pm_score) : null,
+  };
 }
 
 /**

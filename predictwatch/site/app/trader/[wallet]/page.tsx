@@ -69,20 +69,6 @@ export default async function TraderPage({
     );
   }
 
-  const edgeNormalized =
-    stats.avg_edge_pct !== null
-      ? Math.min(Math.max((stats.avg_edge_pct + 100) / 200, 0), 1)
-      : null;
-  const signedLog =
-    stats.realized_pnl_90d !== null
-      ? Math.sign(stats.realized_pnl_90d) * Math.log(1 + Math.abs(stats.realized_pnl_90d))
-      : null;
-  const magnitudeNormalized =
-    signedLog !== null
-      ? Math.min(Math.max((signedLog + 20) / 40, 0), 1)
-      : null;
-  const sampleFactor = Math.min(stats.position_count / 30, 1);
-
   return (
     <div className="min-h-screen">
       <Nav />
@@ -146,30 +132,33 @@ export default async function TraderPage({
             See the <Link href="/methodology" className="text-accent hover:underline">full methodology</Link> for how each piece is calculated.
           </p>
 
-          {stats.position_count > 0 ? (
-            <div className="space-y-7">
-              <ScoreRow
-                label="Average edge (normalized)"
-                weight="50% of score"
-                value={edgeNormalized}
-                description={
-                  stats.avg_edge_pct !== null
-                    ? `Average return across ${stats.position_count} resolved position${stats.position_count === 1 ? "" : "s"} was ${stats.avg_edge_pct >= 0 ? "+" : ""}${stats.avg_edge_pct.toFixed(0)}%. That's mapped onto a 0-100 scale where -100% return scores 0, breakeven (0%) scores 50, and +100% or better scores 100.`
-                    : undefined
-                }
-              />
-              <ScoreRow
-                label="Realized PnL magnitude"
-                weight="50% of score"
-                value={magnitudeNormalized}
-                description="How large this trader's total realized profit or loss has been, log-scaled so a few extreme wallets don't dominate the scale. Breakeven ($0 total) scores 50; larger realized profit scores higher, larger realized loss scores lower."
-              />
-              <ScoreRow
-                label="Sample-size factor"
-                weight="multiplier"
-                value={sampleFactor}
-                description={`Both components above are scaled down for traders with a thin track record, reaching full weight at 30+ resolved positions. This trader has ${stats.position_count} resolved position${stats.position_count === 1 ? "" : "s"}, so the two components are counted at ${(sampleFactor * 100).toFixed(0)}% weight.`}
-              />
+          {stats.position_count > 0 && stats.z_score !== null ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted leading-relaxed max-w-2xl">
+                This trader's average return across {stats.position_count}{" "}
+                resolved position{stats.position_count === 1 ? "" : "s"} was{" "}
+                {stats.avg_edge_pct !== null
+                  ? `${stats.avg_edge_pct >= 0 ? "+" : ""}${stats.avg_edge_pct.toFixed(0)}%`
+                  : "--"}
+                . Sirtio Score doesn't use that raw number directly --
+                it's first blended toward the average trader's return,
+                proportional to how little or much track record exists
+                for this wallet, then measured against how uncertain
+                that blended estimate still is. A thin sample or an
+                inconsistent track record both widen that uncertainty
+                and pull the score toward 50 (breakeven); a large,
+                consistent sample lets the score move further from it
+                in either direction.
+              </p>
+              <div className="flex items-baseline gap-3">
+                <span className="font-mono text-xs uppercase tracking-wide text-muted">
+                  Z-score
+                </span>
+                <span className="font-mono text-sm text-parchment">
+                  {stats.z_score >= 0 ? "+" : ""}
+                  {stats.z_score.toFixed(2)}
+                </span>
+              </div>
             </div>
           ) : (
             <p className="text-sm text-muted">
@@ -230,39 +219,6 @@ export default async function TraderPage({
           )}
         </div>
       </section>
-    </div>
-  );
-}
-
-function ScoreRow({
-  label,
-  weight,
-  value,
-  description,
-}: {
-  label: string;
-  weight: string;
-  value: number | null;
-  description?: string;
-}) {
-  const pct = value !== null ? value * 100 : 0;
-  return (
-    <div>
-      <div className="flex items-baseline justify-between mb-1.5 gap-4">
-        <p className="text-sm text-parchment font-medium">{label}</p>
-        <p className="font-mono text-xs text-muted whitespace-nowrap">
-          {weight}
-          {value !== null ? ` -- scores ${pct.toFixed(0)}/100` : ""}
-        </p>
-      </div>
-      <div className="h-2 rounded-full bg-hairline overflow-hidden">
-        <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
-      </div>
-      {description && (
-        <p className="text-xs text-muted mt-2 leading-relaxed max-w-2xl">
-          {description}
-        </p>
-      )}
     </div>
   );
 }

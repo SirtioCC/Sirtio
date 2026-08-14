@@ -14,7 +14,7 @@ export default function ContactPage() {
           Talk to the team behind the numbers
         </h1>
         <p className="text-lg text-muted leading-relaxed">
-          Sirtio is built and run by a working analytics professional --
+          Sirtio is built and run by working analytics professionals --
           not a faceless product team. Every metric on this site, from
           Sirtio Score down to the realized-PnL ledger behind it, is
           designed, tested, and maintained with the same rigor you'd

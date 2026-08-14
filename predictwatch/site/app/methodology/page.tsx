@@ -116,81 +116,38 @@ export default function MethodologyPage() {
           Realized PnL sidesteps this entirely: it's a continuous dollar
           value that's always well-defined once a position closes,
           regardless of how or why it closed. Nothing in the current
-          formula requires classifying a position as won or lost.
+          model requires classifying a position as won or lost.
         </p>
 
-        <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-8">
-          Two ingredients
+        <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
+          The model
         </h2>
-
-        <div className="space-y-8">
-          <div className="border-t border-hairline pt-6">
-            <div className="flex items-baseline justify-between mb-2">
-              <p className="text-parchment font-medium">Average edge</p>
-              <p className="font-mono text-sm text-accent">50%</p>
-            </div>
-            <p className="text-sm text-muted leading-relaxed">
-              Mean percent return per resolved position, over the last
-              90 days. This measures the quality of each individual
-              trade -- did this position return more than it cost,
-              proportionally -- independent of how large or small the
-              position was.
-            </p>
-          </div>
-
-          <div className="border-t border-hairline pt-6">
-            <div className="flex items-baseline justify-between mb-2">
-              <p className="text-parchment font-medium">Realized PnL magnitude</p>
-              <p className="font-mono text-sm text-accent">50%</p>
-            </div>
-            <p className="text-sm text-muted leading-relaxed mb-3">
-              Total dollar-realized PnL over the last 90 days, sign-
-              preserving log-compressed. Real tracked wallets span an
-              enormous range -- from -$49.5M to +$16.1M -- so a plain
-              linear scale would let one extreme wallet dominate the
-              entire leaderboard's spread. A signed log transform keeps
-              the ordering intact (more profit still scores higher)
-              while compressing the scale so mid-sized traders remain
-              meaningfully differentiated too.
-            </p>
-            <p className="text-sm text-muted leading-relaxed">
-              This is the piece that directly honors "realized PnL" as
-              the core signal, rather than just a normalized percentage
-              -- a trader who's actually made real, substantial money
-              scores meaningfully higher than one who hasn't, even at
-              a similar average edge.
-            </p>
-          </div>
-
-          <div className="border-t border-hairline pt-6">
-            <div className="flex items-baseline justify-between mb-2">
-              <p className="text-parchment font-medium">Sample-size damping</p>
-              <p className="font-mono text-sm text-accent">multiplier</p>
-            </div>
-            <p className="text-sm text-muted leading-relaxed">
-              Both components above get multiplied by
-              min(positions / 30, 1) -- a trader with 1 resolved
-              position and a huge lucky win still gets crushed down to
-              a low score (verified: +$5M on a single trade with a
-              500% edge scores 3.1, not close to the top), no matter
-              how good that one trade looks. This is the direct fix
-              for survivorship bias and one-hit wonders.
-            </p>
-          </div>
-
-          <div className="border-t border-hairline pt-6">
-            <div className="flex items-baseline justify-between mb-2">
-              <p className="text-parchment font-medium">Rolling window</p>
-              <p className="font-mono text-sm text-accent">last 90 days</p>
-            </div>
-            <p className="text-sm text-muted leading-relaxed">
-              Only positions that resolved in the last 90 days count
-              toward the score -- recent form only, since Polymarket's
-              APIs don't reliably retain a trader's full historical
-              record indefinitely.
-            </p>
-          </div>
-        </div>
+        <p className="text-sm text-muted leading-relaxed mb-4">
+          Sirtio Score is built on a statistical technique used across
+          fields that face the same underlying problem: estimating
+          someone's true skill from a limited, noisy sample. A handful
+          of trades can look great by chance; a large, consistent track
+          record is much harder to fake.
+        </p>
+        <p className="text-sm text-muted leading-relaxed mb-4">
+          Rather than scoring a trader's raw average return directly,
+          the model blends it with what's typical across the whole
+          tracked pool -- weighted by how much real history exists for
+          that specific wallet. A trader with only a few resolved
+          positions gets pulled closer to the pool average; a trader
+          with a long, consistent record gets judged much more on
+          their own numbers. The score is then based on how far that
+          blended estimate sits from average, relative to how
+          confident the model actually is in that estimate --
+          rewarding traders who are both profitable and consistent,
+          not just traders who got lucky once.
+        </p>
+        <p className="text-sm text-muted leading-relaxed">
+          We're intentionally not publishing the exact formula, weights,
+          or constants behind this -- see below. What's above is the
+          real shape of how it works, not a simplification hiding
+          something different underneath.
+        </p>
 
         <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
           The formula
@@ -205,28 +162,24 @@ export default function MethodologyPage() {
           How to read your score
         </h2>
         <p className="text-sm text-muted leading-relaxed mb-6">
-          A breakeven trader -- 0% average edge, $0 total realized PnL --
-          scores exactly <strong className="text-parchment">50</strong>,
-          the same clean midpoint property the previous formula had.
-          Verified against the same documented test case that motivated
-          the original entropy-weighting fix: a trader holding 30
-          identical "obvious" 97c wins (tiny edge, tiny total PnL) now
-          scores <strong className="text-parchment">59.3</strong>, while
-          a genuinely skilled trader who won 25 of 30 real coin-flip
-          bets (real edge, real total PnL) scores{" "}
-          <strong className="text-parchment">78.2</strong> -- still
-          correctly favoring real skill, even with win rate removed
-          from the formula entirely.
+          A trader who's statistically indistinguishable from the
+          average tracked trader -- given how much history exists on
+          them -- scores exactly{" "}
+          <strong className="text-parchment">50</strong>. Scores above
+          that reflect a trader the model is increasingly confident is
+          outperforming; scores below reflect the opposite. Tier labels
+          on the leaderboard (Elite, Great, Good, and so on) are set
+          from the real distribution of scores across currently tracked
+          traders, not fixed round numbers -- they get re-checked as
+          more history accumulates.
         </p>
 
         <p className="text-xs text-muted leading-relaxed mb-12">
-          These specific numbers are illustrative, not validated
-          thresholds -- they haven't been checked against the real
-          distribution of actual Polymarket traders yet, since that
-          requires more accumulated history than the site has today.
-          Once there's enough data across enough traders, the better
-          long-term approach is switching to percentile-based bands
-          instead of any fixed formula-derived cutoffs.
+          The exact thresholds are still early -- this model has only
+          been running against real data for a short time. As more
+          resolved positions accumulate across more traders, the tier
+          cutoffs get revisited against the real, current distribution
+          rather than left as a first guess.
         </p>
 
         <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
@@ -236,11 +189,22 @@ export default function MethodologyPage() {
           <li className="flex gap-3">
             <span className="text-signal-no mt-1">-</span>
             <span>
-              <strong className="text-parchment">Not backtested.</strong>{" "}
-              The weights above (50/50) are a reasonable starting
-              point, not a validated model. They need to be checked
-              against real outcomes over time before they should be
-              treated as precise.
+              <strong className="text-parchment">Still young.</strong>{" "}
+              The model started running against real data recently.
+              Its behavior gets watched and re-checked as more history
+              accumulates, the same way the score's tier cutoffs do.
+            </span>
+          </li>
+          <li className="flex gap-3">
+            <span className="text-signal-no mt-1">-</span>
+            <span>
+              <strong className="text-parchment">Formula not public.</strong>{" "}
+              We've described the real shape of the model above, but
+              the exact formula, weights, and constants are kept
+              private. That's a deliberate choice, not an attempt to
+              seem more sophisticated than we are -- we'd rather be
+              transparent about how it works in principle and protect
+              the specifics.
             </span>
           </li>
           <li className="flex gap-3">
