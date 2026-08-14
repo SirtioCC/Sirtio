@@ -35,7 +35,7 @@ export default async function LeaderboardPage() {
       <Nav />
       <section className="max-w-6xl mx-auto px-6 py-16">
         <h1 className="font-[family-name:var(--font-display)] text-4xl text-parchment mb-2">
-          Trader leaderboard
+          Sirtio Score Leaderboard
         </h1>
         <p className="text-muted mb-2">
           Polymarket only -- Kalshi doesn't expose public trader data.
@@ -73,7 +73,9 @@ export default async function LeaderboardPage() {
               <span className="text-right">Sirtio Score</span>
               <span className="text-right">Predictions (Last 90D)</span>
             </div>
-            {traders.map((t, i) => (
+            {traders
+              .filter((t) => t.pm_score !== null || t.position_count > 0)
+              .map((t, i) => (
               <div key={t.wallet}
                 className="grid grid-cols-[40px_1fr_150px_140px] items-center gap-6 py-4 border-b border-hairline"
               >
@@ -112,6 +114,17 @@ export default async function LeaderboardPage() {
                 </span>
               </div>
             ))}
+            {traders.some((t) => t.pm_score === null && t.position_count === 0) && (
+              <p className="text-xs text-muted/70 leading-relaxed mt-6 pt-6 border-t border-hairline">
+                Every trader beyond this rank does not currently meet
+                the minimum requirements for a Sirtio Score. This can
+                happen for a few reasons -- no resolved positions in
+                the last 90 days, or trading activity consistent with
+                automated/bot behavior, which we filter out before
+                scoring. They remain part of Polymarket's tracked pool
+                and may appear here once they qualify.
+              </p>
+            )}
           </div>
         )}
       </section>

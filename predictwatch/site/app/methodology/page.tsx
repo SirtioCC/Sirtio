@@ -10,7 +10,7 @@ export default function MethodologyPage() {
           Methodology
         </p>
         <h1 className="font-[family-name:var(--font-display)] text-4xl md:text-5xl leading-tight text-parchment mb-8">
-          Why we don't just rank by dollars
+          The Sirtio Score
         </h1>
         <p className="text-lg text-muted leading-relaxed">
           Every other prediction-market leaderboard sorts by total profit.
