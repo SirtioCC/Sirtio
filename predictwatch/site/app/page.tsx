@@ -2,10 +2,11 @@
 import Nav from "@/components/Nav";
 import ProbabilityBar from "@/components/ProbabilityBar";
 import { getTopMarkets, getLeaderboard, getHeroStats } from "@/lib/queries";
-import { getDisplayName } from "@/lib/format";
+import { getDisplayName, marketSourceUrl } from "@/lib/format";
 
 function formatVolume(v: number | null) {
   if (!v) return "$0";
+  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`;
   if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
   if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;
   return `$${v.toFixed(0)}`;
@@ -24,7 +25,7 @@ export default async function Home() {
 
       <section className="max-w-6xl mx-auto px-6 pt-20 pb-16">
         <p className="font-mono text-xs uppercase tracking-widest text-accent mb-6">
-          Kalshi Â· Polymarket
+          Kalshi · Polymarket
         </p>
         <h1 className="font-[family-name:var(--font-display)] text-5xl md:text-6xl leading-[1.05] max-w-3xl text-parchment">
           Is this trader{" "}
@@ -33,8 +34,8 @@ export default async function Home() {
         </h1>
         <p className="mt-6 text-lg text-muted max-w-xl">
           Every prediction-market leaderboard ranks by raw dollars. We rank by
-          skill â€” win rate, consistency, and edge, weighted by how much
-          history actually backs it up.
+          skill -- win rate, average edge, and calibration, weighted by how
+          much history actually backs it up.
         </p>
         <div className="mt-10 flex gap-4">
           <Link
@@ -81,22 +82,39 @@ export default async function Home() {
             Most active markets
           </h2>
           <Link href="/markets" className="text-sm text-accent hover:underline">
-            View all â†’
+            View all --&gt;
           </Link>
         </div>
         <div className="space-y-1">
           {markets.map((m) => (
             <div
               key={`${m.source}-${m.external_id}`}
-              className="grid grid-cols-[1fr_auto_140px] items-center gap-6 py-4 border-b border-hairline"
+              className="grid grid-cols-[1fr_200px_90px] items-center gap-6 py-4 border-b border-hairline"
             >
               <div>
                 <p className="text-parchment">{m.title}</p>
                 <p className="text-xs text-muted mt-1 uppercase tracking-wide">
-                  {m.source} Â· {formatVolume(m.volume)} vol
+                  {m.source} · {formatVolume(m.volume)} vol
+                  {marketSourceUrl(m.source, m.external_id, m.slug, m.title) && (
+                    <>
+                      {" "}
+                      ·{" "}
+                      <a
+                        href={marketSourceUrl(m.source, m.external_id, m.slug, m.title)!}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-accent hover:underline normal-case tracking-normal"
+                      >
+                        {m.source === "kalshi" ? "Search on Kalshi" : "View market"}
+                      </a>
+                    </>
+                  )}
                 </p>
               </div>
-              <ProbabilityBar yesPriceCents={m.yes_price_cents} />
+              <ProbabilityBar yesPriceCents={m.yes_price_cents} hidePrice />
+              <span className="font-mono text-sm tabular-nums text-parchment text-right">
+                {m.yes_price_cents !== null ? `${Math.min(100, Math.max(0, m.yes_price_cents)).toFixed(0)}¢` : "--"}
+              </span>
             </div>
           ))}
         </div>
@@ -108,7 +126,7 @@ export default async function Home() {
             Top traders by skill
           </h2>
           <Link href="/leaderboard" className="text-sm text-accent hover:underline">
-            Full leaderboard â†’
+            Full leaderboard --&gt;
           </Link>
         </div>
         <div className="space-y-1">
@@ -129,10 +147,10 @@ export default async function Home() {
                 </p>
               </div>
               <span className="font-mono text-sm text-signal-yes">
-                {t.pm_score !== null ? t.pm_score.toFixed(1) : "â€”"}
+                {t.pm_score !== null ? t.pm_score.toFixed(1) : "--"}
               </span>
               <span className="font-mono text-sm text-muted text-right">
-                {formatVolume(t.pnl)} pnl
+                {t.position_count} predictions (90d)
               </span>
             </div>
           ))}
@@ -140,11 +158,10 @@ export default async function Home() {
       </section>
 
       <footer className="max-w-6xl mx-auto px-6 py-12 text-sm text-muted">
-        Analytics, not betting advice. PM Score is directional, not
+        Analytics, not betting advice. Sirtio Score is directional, not
         financial guidance.
       </footer>
     </div>
   );
 }
-
 

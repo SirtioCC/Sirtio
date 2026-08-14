@@ -1,7 +1,9 @@
 export default function ProbabilityBar({
   yesPriceCents,
+  hidePrice = false,
 }: {
   yesPriceCents: number | null;
+  hidePrice?: boolean;
 }) {
   const yes = yesPriceCents ?? 50;
   const clamped = Math.min(100, Math.max(0, yes));
@@ -14,9 +16,11 @@ export default function ProbabilityBar({
           style={{ width: `${clamped}%` }}
         />
       </div>
-      <span className="font-mono text-sm tabular-nums text-parchment w-12 text-right">
-        {clamped.toFixed(0)}¢
-      </span>
+      {!hidePrice && (
+        <span className="font-mono text-sm tabular-nums text-parchment w-12 text-right">
+          {clamped.toFixed(0)}¢
+        </span>
+      )}
     </div>
   );
 }

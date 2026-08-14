@@ -14,3 +14,19 @@ export function truncateWallet(wallet: string): string {
 export function polymarketProfileUrl(wallet: string): string {
   return `https://polymarket.com/profile/${wallet}`;
 }
+
+export function marketSourceUrl(source: string, externalId: string, slug: string | null, title: string): string | null {
+  if (source === "polymarket") {
+    return slug ? `https://polymarket.com/event/${slug}` : null;
+  }
+  if (source === "kalshi") {
+    // Kalshi's real market-page URL needs its event ticker plus a
+    // human-written slug segment that isn't derivable from our data
+    // (confirmed 2026-08-13 -- a market ticker alone 404s for most
+    // markets; only a small subset appear to resolve via a shortcut
+    // path). Search results are a reliable fallback instead --
+    // confirmed real, working pattern: kalshi.com/search?q=...
+    return title ? `https://kalshi.com/search?q=${encodeURIComponent(title)}` : null;
+  }
+  return null;
+}

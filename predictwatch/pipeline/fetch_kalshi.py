@@ -58,57 +58,6 @@ def fetch_all_markets(status="open"):
     return markets
 
 
-def fetch_recently_settled(days=2):
-    """
-    Fetch markets that settled within the last `days` days -- this is
-    the fix for a real gap: our main fetch only ever requests
-    status="open" markets, so once a market resolves it drops out of
-    what we ask for and its final result is never captured. This
-    targets status="settled" with a min_close_ts bound instead of
-    pulling Kalshi's entire settled-market history, which would be
-    enormous.
-    """
-    from datetime import timedelta
-    min_close_ts = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
-
-    markets = []
-    cursor = None
-    page_num = 0
-    max_pages = 2000  # raised to match open-markets scale after hitting 40,000 in testing
-    seen_cursors = set()
-    while True:
-        page_num += 1
-        if page_num > max_pages:
-            print(f"  Hit safety cap of {max_pages} pages for settled markets - stopping.")
-            break
-        params = {
-            "limit": PAGE_LIMIT,
-            "status": "settled",
-            "mve_filter": "exclude",
-            "min_close_ts": min_close_ts,
-        }
-        if cursor:
-            params["cursor"] = cursor
-        resp = requests.get(f"{BASE_URL}/markets", params=params, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        batch = data.get("markets", [])
-        markets.extend(batch)
-        print(f"  settled page {page_num}: +{len(batch)} markets (running total: {len(markets)})")
-
-        new_cursor = data.get("cursor")
-        if new_cursor and new_cursor in seen_cursors:
-            print("  BUG DETECTED: cursor repeated on settled-markets fetch - stopping.")
-            break
-        if new_cursor:
-            seen_cursors.add(new_cursor)
-        cursor = new_cursor
-        if not cursor:
-            break
-        time.sleep(0.2)
-    return markets
-
-
 def normalize_market(m: dict) -> dict:
     """
     Normalize a Kalshi market into our common schema.
@@ -133,6 +82,7 @@ def normalize_market(m: dict) -> dict:
     return {
         "source": "kalshi",
         "external_id": m.get("ticker"),
+        "slug": None,
         "title": m.get("title"),
         "category": m.get("category"),
         "yes_price_cents": to_cents(m.get("yes_bid_dollars")),
@@ -154,21 +104,6 @@ def run(min_volume=1):
     normalized = [normalize_market(m) for m in raw]
     filtered = [r for r in normalized if (r["volume"] or 0) >= min_volume]
     print(f"  Kept {len(filtered)} of {len(normalized)} markets after "
-          f"filtering out volume < {min_volume}")
-    return filtered
-
-
-def run_resolved(days=2, min_volume=1):
-    """
-    Fetch and normalize recently-settled markets -- this is what
-    actually lets the accuracy leaderboard exist, since it's the only
-    path by which the `result` field ever gets populated in our data.
-    Same volume filter as run() for consistency and storage sanity.
-    """
-    raw = fetch_recently_settled(days=days)
-    normalized = [normalize_market(m) for m in raw]
-    filtered = [r for r in normalized if (r["volume"] or 0) >= min_volume]
-    print(f"  Kept {len(filtered)} of {len(normalized)} resolved markets after "
           f"filtering out volume < {min_volume}")
     return filtered
 

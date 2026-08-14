@@ -40,6 +40,13 @@ from datetime import datetime, timezone, timedelta
 CLOSED_POSITIONS_URL = "https://data-api.polymarket.com/closed-positions"
 PAGE_LIMIT = 50  # confirmed API max for this endpoint (much smaller than /positions' 500)
 WINDOW_DAYS = 90
+BOT_POSITION_CAP = 3000  # a wallet with more resolved positions than this in a
+# 90-day window isn't a human placing predictions -- almost certainly a
+# market-making/arbitrage script. Stop paginating for that wallet as soon
+# as the running count crosses this line, rather than fetching its entire
+# history first and judging afterward (real wallets seen with 25,000-
+# 37,000+ closed positions, several hitting the 1000-page safety cap and
+# still not finishing -- this was the dominant cost in pipeline runtime).
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -63,6 +70,7 @@ def fetch_closed_positions_for_wallet(wallet: str, window_days: int = WINDOW_DAY
     offset = 0
     page_num = 0
     max_pages = 1000  # hard safety net; window-based early-stop should trigger well before this
+    hit_bot_cap = False
     while True:
         page_num += 1
         if page_num > max_pages:
@@ -100,11 +108,18 @@ def fetch_closed_positions_for_wallet(wallet: str, window_days: int = WINDOW_DAY
         if hit_cutoff:
             break
 
+        if len(closed) > BOT_POSITION_CAP:
+            hit_bot_cap = True
+            print(f"    {wallet} exceeded {BOT_POSITION_CAP} resolved positions "
+                  f"within the 90-day window (likely bot) - stopping early at "
+                  f"{len(closed)}.")
+            break
+
         offset += PAGE_LIMIT
         if len(batch) < PAGE_LIMIT:
             break
         time.sleep(0.2)
-    return closed
+    return closed, hit_bot_cap
 
 
 def normalize_closed_position(wallet: str, p: dict) -> dict:
@@ -143,11 +158,19 @@ def run(wallets: list[str]):
     Fetch closed positions for a list of wallets, deduplicated by
     (wallet, condition_id) -- same reasoning as the open-positions
     fetcher: a single closed position should appear once per wallet.
+
+    Returns (all_rows, bot_wallets) -- bot_wallets is the set of wallets
+    that exceeded BOT_POSITION_CAP and had their pagination cut short,
+    so callers (e.g. the activity/ledger step) can skip them too rather
+    than re-deriving the same judgment from partial data afterward.
     """
     all_rows = []
+    bot_wallets = set()
     for i, wallet in enumerate(wallets, 1):
         try:
-            raw = fetch_closed_positions_for_wallet(wallet)
+            raw, hit_bot_cap = fetch_closed_positions_for_wallet(wallet)
+            if hit_bot_cap:
+                bot_wallets.add(wallet)
             normalized = [normalize_closed_position(wallet, p) for p in raw]
             deduped = list({(r["wallet"], r["condition_id"]): r for r in normalized}.values())
             if len(deduped) != len(normalized):
@@ -159,12 +182,12 @@ def run(wallets: list[str]):
         except Exception as e:
             print(f"  [{i}/{len(wallets)}] {wallet}: FAILED - {e}")
         time.sleep(0.3)
-    return all_rows
+    return all_rows, bot_wallets
 
 
 if __name__ == "__main__":
     test_wallet = "0x6af75d4e4aaf700450efbac3708cce1665810ff1"
-    rows = run([test_wallet])
+    rows, bots = run([test_wallet])
     print(f"Fetched {len(rows)} closed positions for {test_wallet}")
     for r in rows[:3]:
         print(r)

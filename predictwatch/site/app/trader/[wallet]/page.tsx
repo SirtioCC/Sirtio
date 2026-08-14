@@ -13,13 +13,6 @@ function formatMoney(v: number | null) {
   return `${sign}$${abs.toFixed(0)}`;
 }
 
-function formatPlainMoney(v: number | null) {
-  if (v === null) return "--";
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;
-  return `$${v.toFixed(0)}`;
-}
-
 export default async function TraderPage({
   params,
 }: {
@@ -34,10 +27,10 @@ export default async function TraderPage({
         <Nav />
         <section className="max-w-3xl mx-auto px-6 py-20 text-center">
           <p className="font-[family-name:var(--font-display)] text-3xl text-parchment mb-4">
-            No trader found for &quot;{decodeURIComponent(rawParam)}&quot;
+            No trader found for "{decodeURIComponent(rawParam)}"
           </p>
           <p className="text-muted mb-8">
-            We only track wallets that have appeared on Polymarket&apos;s
+            We only track wallets that have appeared on Polymarket's
             top-25 leaderboard so far. Try a wallet address, or browse
             the full leaderboard below.
           </p>
@@ -65,8 +58,8 @@ export default async function TraderPage({
             No data for this wallet yet
           </p>
           <p className="text-muted mb-8">
-            This wallet isn&apos;t currently on Polymarket&apos;s top-25
-            leaderboard, so we don&apos;t have position data for it.
+            This wallet isn't currently on Polymarket's top-25
+            leaderboard, so we don't have position data for it.
           </p>
           <Link href="/leaderboard" className="text-accent hover:underline">
             View the leaderboard --&gt;
@@ -76,22 +69,17 @@ export default async function TraderPage({
     );
   }
 
-  // getTraderPositions already returns exactly the resolved-last-30-days
-  // set that PM Score is computed from -- no separate filtering needed
-  // here anymore, the two are guaranteed to match.
-  const winCount = positions.filter((p) => (p.realized_pnl ?? 0) > 0).length;
-  const lossCount = positions.filter((p) => (p.realized_pnl ?? 0) <= 0).length;
-  const winPct = positions.length > 0 ? (winCount / positions.length) * 100 : 0;
-
-  // Same normalization the SQL formula uses, mirrored here for the
-  // component breakdown display
   const edgeNormalized =
     stats.avg_edge_pct !== null
       ? Math.min(Math.max((stats.avg_edge_pct + 100) / 200, 0), 1)
       : null;
-  const calibrationNormalized =
-    stats.calibration_edge !== null
-      ? Math.min(Math.max(stats.calibration_edge + 0.5, 0), 1)
+  const signedLog =
+    stats.realized_pnl_90d !== null
+      ? Math.sign(stats.realized_pnl_90d) * Math.log(1 + Math.abs(stats.realized_pnl_90d))
+      : null;
+  const magnitudeNormalized =
+    signedLog !== null
+      ? Math.min(Math.max((signedLog + 20) / 40, 0), 1)
       : null;
   const sampleFactor = Math.min(stats.position_count / 30, 1);
 
@@ -103,7 +91,6 @@ export default async function TraderPage({
           --&gt; Back to leaderboard
         </Link>
 
-        {/* Header */}
         <div className="mt-6 flex items-start justify-between flex-wrap gap-6">
           <div>
             <h1 className="font-[family-name:var(--font-display)] text-4xl text-parchment mb-2">
@@ -129,29 +116,13 @@ export default async function TraderPage({
           )}
         </div>
 
-        {/* Stat cards */}
-        <div className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="border border-hairline rounded-lg p-5">
-            <p className="text-xs uppercase tracking-wide text-muted mb-2">Total PnL</p>
-            <p className={`font-[family-name:var(--font-display)] text-2xl ${
-                (stats.pnl ?? 0) >= 0 ? "text-signal-yes" : "text-signal-no"
-              }`}
-            >
-              {formatMoney(stats.pnl)}
-            </p>
-          </div>
-          <div className="border border-hairline rounded-lg p-5">
-            <p className="text-xs uppercase tracking-wide text-muted mb-2">Volume</p>
-            <p className="font-[family-name:var(--font-display)] text-2xl text-parchment">
-              {formatPlainMoney(stats.volume)}
-            </p>
-          </div>
+        <div className="mt-12 grid grid-cols-2 gap-4 max-w-xl">
           <div className="border border-hairline rounded-lg p-5">
             <p className="text-xs uppercase tracking-wide text-muted mb-2">
-              Win rate (weighted)
+              Avg edge (per position)
             </p>
             <p className="font-[family-name:var(--font-display)] text-2xl text-parchment">
-              {stats.win_rate !== null ? `${(stats.win_rate * 100).toFixed(0)}%` : "--"}
+              {stats.avg_edge_pct !== null ? `${stats.avg_edge_pct >= 0 ? "+" : ""}${stats.avg_edge_pct.toFixed(0)}%` : "--"}
             </p>
           </div>
           <div className="border border-hairline rounded-lg p-5">
@@ -162,11 +133,10 @@ export default async function TraderPage({
           </div>
         </div>
 
-        {/* PM Score breakdown */}
         <div className="mt-16">
           <div className="flex items-baseline justify-between mb-6">
             <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment">
-              PM Score breakdown
+              Sirtio Score breakdown
             </h2>
             <p className="font-mono text-3xl text-signal-yes">
               {stats.pm_score !== null ? stats.pm_score.toFixed(1) : "--"}
@@ -177,38 +147,38 @@ export default async function TraderPage({
           </p>
 
           {stats.position_count > 0 ? (
-            <div className="space-y-5">
-              <ScoreRow label="Win rate" weight="40%" value={stats.win_rate} />
-              <ScoreRow label="Average edge (normalized)" weight="35%" value={edgeNormalized} />
-              <ScoreRow label="Calibration edge" weight="25%" value={calibrationNormalized} />
-              <ScoreRow label="Sample-size factor" weight="multiplier" value={sampleFactor} />
+            <div className="space-y-7">
+              <ScoreRow
+                label="Average edge (normalized)"
+                weight="50% of score"
+                value={edgeNormalized}
+                description={
+                  stats.avg_edge_pct !== null
+                    ? `Average return across ${stats.position_count} resolved position${stats.position_count === 1 ? "" : "s"} was ${stats.avg_edge_pct >= 0 ? "+" : ""}${stats.avg_edge_pct.toFixed(0)}%. That's mapped onto a 0-100 scale where -100% return scores 0, breakeven (0%) scores 50, and +100% or better scores 100.`
+                    : undefined
+                }
+              />
+              <ScoreRow
+                label="Realized PnL magnitude"
+                weight="50% of score"
+                value={magnitudeNormalized}
+                description="How large this trader's total realized profit or loss has been, log-scaled so a few extreme wallets don't dominate the scale. Breakeven ($0 total) scores 50; larger realized profit scores higher, larger realized loss scores lower."
+              />
+              <ScoreRow
+                label="Sample-size factor"
+                weight="multiplier"
+                value={sampleFactor}
+                description={`Both components above are scaled down for traders with a thin track record, reaching full weight at 30+ resolved positions. This trader has ${stats.position_count} resolved position${stats.position_count === 1 ? "" : "s"}, so the two components are counted at ${(sampleFactor * 100).toFixed(0)}% weight.`}
+              />
             </div>
           ) : (
             <p className="text-sm text-muted">
-              No resolved positions yet -- PM Score needs at least some
+              No resolved positions yet -- Sirtio Score needs at least some
               position history to compute.
             </p>
           )}
         </div>
 
-        {/* Win/loss split -- resolved positions only, see note above */}
-        {positions.length > 0 && (
-          <div className="mt-16">
-            <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mb-6">
-              Position outcomes (resolved only)
-            </h2>
-            <div className="flex items-center gap-3">
-              <div className="relative h-3 flex-1 rounded-full bg-signal-no overflow-hidden">
-                <div className="absolute inset-y-0 left-0 bg-signal-yes" style={{ width: `${winPct}%` }} />
-              </div>
-              <span className="font-mono text-sm text-muted whitespace-nowrap">
-                {winCount} win{winCount === 1 ? "" : "s"} / {lossCount} loss{lossCount === 1 ? "" : "es"}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Positions table */}
         <div className="mt-16">
           <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mb-6">
             All positions (last 90 days)
@@ -217,29 +187,29 @@ export default async function TraderPage({
             <p className="text-sm text-muted">No positions resolved in the last 90 days for this wallet.</p>
           ) : (
             <div>
-              <div className="grid grid-cols-[1fr_80px_90px_90px_100px_90px] gap-4 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
+              <div className="grid grid-cols-[1fr_80px_90px_100px_90px] gap-4 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
                 <span>Market</span>
                 <span className="text-right">Side</span>
                 <span className="text-right">Entry</span>
-                <span className="text-right">Current</span>
                 <span className="text-right">PnL</span>
                 <span className="text-right">Return</span>
               </div>
               {positions.map((p) => {
                 return (
                   <div key={p.condition_id}
-                    className="grid grid-cols-[1fr_80px_90px_90px_100px_90px] items-center gap-4 py-3 border-b border-hairline"
+                    className="grid grid-cols-[1fr_80px_90px_100px_90px] items-center gap-4 py-3 border-b border-hairline"
                   >
                     <div>
                       <p className="text-sm text-parchment truncate">{p.market_title || "--"}</p>
-                      <p className="text-xs text-muted mt-0.5">Resolved</p>
+                      <p className="text-xs text-muted mt-0.5">
+                        {p.closed_at
+                          ? `Resolved ${new Date(p.closed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+                          : "Resolved"}
+                      </p>
                     </div>
                     <span className="font-mono text-xs text-muted text-right">{p.outcome || "--"}</span>
                     <span className="font-mono text-xs text-muted text-right">
                       {p.avg_price !== null ? `${(p.avg_price * 100).toFixed(0)}c` : "--"}
-                    </span>
-                    <span className="font-mono text-xs text-muted text-right">
-                      {p.cur_price !== null ? `${(p.cur_price * 100).toFixed(0)}c` : "--"}
                     </span>
                     <span className={`font-mono text-xs text-right ${
                         (p.realized_pnl ?? 0) >= 0 ? "text-signal-yes" : "text-signal-no"
@@ -268,23 +238,31 @@ function ScoreRow({
   label,
   weight,
   value,
+  description,
 }: {
   label: string;
   weight: string;
   value: number | null;
+  description?: string;
 }) {
   const pct = value !== null ? value * 100 : 0;
   return (
     <div>
-      <div className="flex items-baseline justify-between mb-1.5">
-        <p className="text-sm text-parchment">{label}</p>
-        <p className="font-mono text-xs text-muted">
-          {weight} {value !== null ? `-- ${pct.toFixed(0)}%` : ""}
+      <div className="flex items-baseline justify-between mb-1.5 gap-4">
+        <p className="text-sm text-parchment font-medium">{label}</p>
+        <p className="font-mono text-xs text-muted whitespace-nowrap">
+          {weight}
+          {value !== null ? ` -- scores ${pct.toFixed(0)}/100` : ""}
         </p>
       </div>
       <div className="h-2 rounded-full bg-hairline overflow-hidden">
         <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
       </div>
+      {description && (
+        <p className="text-xs text-muted mt-2 leading-relaxed max-w-2xl">
+          {description}
+        </p>
+      )}
     </div>
   );
 }

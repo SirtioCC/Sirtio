@@ -22,7 +22,7 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PredictWatch — Prediction market intelligence",
+  title: "Sirtio — Prediction market intelligence",
   description:
     "Market data and trader skill scores across Kalshi and Polymarket. Is this trader actually good, or did they get lucky?",
 };

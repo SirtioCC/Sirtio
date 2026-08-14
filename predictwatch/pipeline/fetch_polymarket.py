@@ -69,52 +69,6 @@ def fetch_all_markets(active=True, min_volume=1):
     return markets
 
 
-def fetch_recently_closed(days=2):
-    """
-    Fetch markets that closed within the last `days` days -- same fix
-    as Kalshi's fetch_recently_settled: our main fetch only ever
-    requests active=True markets, so a market's final resolved outcome
-    never gets captured otherwise. Targets closed=true with an
-    end_date_min bound instead of pulling all historical closed
-    markets, which would be enormous.
-    """
-    from datetime import timedelta
-    end_date_min = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    markets = []
-    offset = 0
-    page_num = 0
-    max_pages = 200  # recently-closed markets in a short window should be far smaller than open ones
-    while True:
-        page_num += 1
-        if page_num > max_pages:
-            print(f"  Hit safety cap of {max_pages} pages for recently-closed markets — stopping.")
-            break
-        params = {
-            "limit": PAGE_LIMIT,
-            "offset": offset,
-            "closed": "true",
-            "end_date_min": end_date_min,
-            "order": "endDate",
-            "ascending": "false",
-        }
-        resp = requests.get(f"{GAMMA_URL}/markets", params=params, timeout=30)
-        if resp.status_code == 422:
-            print(f"  Got 422 at offset {offset} on recently-closed fetch — stopping.")
-            break
-        resp.raise_for_status()
-        batch = resp.json()
-        if not batch:
-            break
-        markets.extend(batch)
-        print(f"  closed page {page_num}: +{len(batch)} markets (running total: {len(markets)})")
-        offset += PAGE_LIMIT
-        if len(batch) < PAGE_LIMIT:
-            break
-        time.sleep(0.2)
-    return markets
-
-
 def normalize_market(m: dict) -> dict:
     """Normalize a Polymarket market into our common schema."""
     # outcomePrices is usually a JSON-encoded string like '["0.62", "0.38"]'
@@ -136,6 +90,7 @@ def normalize_market(m: dict) -> dict:
     return {
         "source": "polymarket",
         "external_id": m.get("id"),
+        "slug": m.get("slug"),
         "title": m.get("question"),
         # No top-level "category" field on /markets — confirmed against a live
         # response 2026-08-10. Leaving None for now; category-level analysis
@@ -166,45 +121,6 @@ def run(min_volume=1):
         print(f"  Backstop filter dropped {len(normalized) - len(filtered)} "
               f"more markets with missing/invalid volume data")
     print(f"  Final count: {len(filtered)} markets")
-    return filtered
-
-
-def run_resolved(days=2, min_volume=1):
-    """
-    Fetch and normalize recently-closed markets -- this is what
-    actually lets the accuracy leaderboard exist, since it's the only
-    path by which the `result` field ever gets populated in our data.
-
-    Force status="closed" on every row here rather than trusting the
-    normalizer's derived status (based on the `active` flag) -- found
-    via live testing that `active` doesn't reliably flip to false even
-    after a market has genuinely resolved (e.g. "who will be the next
-    X" markets, where every losing candidate resolves immediately once
-    the real winner is announced, but the category's placeholder end
-    date can still be years out). Since these came from a closed=true
-    query, we already know for certain they're closed.
-    """
-    raw = fetch_recently_closed(days=days)
-    normalized = [normalize_market(m) for m in raw]
-    for m, r in zip(raw, normalized):
-        r["status"] = "closed"
-        # outcomePrices collapses to exactly 0/1 once settled (confirmed
-        # via live data) -- useless for calibration analysis, since it
-        # no longer reflects what the market believed beforehand.
-        # lastTradePrice is Polymarket's own field for the last real
-        # trade before the market stopped trading -- a much more
-        # meaningful pre-resolution signal, confirmed present on the
-        # market object via Polymarket's own API issue tracker.
-        last_trade = m.get("lastTradePrice")
-        if last_trade is not None:
-            try:
-                r["yes_price_cents"] = round(float(last_trade) * 100, 2)
-                r["no_price_cents"] = round(100 - r["yes_price_cents"], 2)
-            except (TypeError, ValueError):
-                pass
-    filtered = [r for r in normalized if (r["volume"] or 0) >= min_volume]
-    print(f"  Kept {len(filtered)} of {len(normalized)} resolved markets after "
-          f"filtering out volume < {min_volume}")
     return filtered
 
 
