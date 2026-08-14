@@ -4,6 +4,12 @@ import CopyableWallet from "@/components/CopyableWallet";
 import { getLeaderboard } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 
+export const metadata = {
+  title: "Trader Leaderboard",
+  description:
+    "The top Polymarket traders ranked by Sirtio Score -- a statistical model built to separate real trading skill from lucky one-off bets, using realized PnL and Bayesian shrinkage.",
+};
+
 // Sirtio Score is built so 50 represents a truly break-even trader
 // (0% avg edge, $0 realized PnL) at full sample size -- see
 // methodology's formula section. Sample-size damping only ever pulls
@@ -35,7 +41,7 @@ export default async function LeaderboardPage() {
       <Nav />
       <section className="max-w-6xl mx-auto px-6 py-16">
         <h1 className="font-[family-name:var(--font-display)] text-4xl text-parchment mb-2">
-          Sirtio Score Leaderboard
+          Trader leaderboard
         </h1>
         <p className="text-muted mb-2">
           Polymarket only -- Kalshi doesn't expose public trader data.

@@ -13,11 +13,79 @@ function formatMoney(v: number | null) {
   return `${sign}$${abs.toFixed(0)}`;
 }
 
+// Real, varied per-trader summary text -- not a single templated
+// sentence reused verbatim across every page. Search engines treat
+// near-duplicate boilerplate across many pages as low-value; this
+// gives each trader page unique, indexable prose grounded in their
+// actual numbers, with wording that changes by tier (same z_score
+// bands as scoreTier() on the leaderboard page).
+function traderSummary(stats: {
+  position_count: number;
+  avg_edge_pct: number | null;
+  z_score: number | null;
+  rank: number | null;
+}, name: string): string {
+  const { position_count, avg_edge_pct, z_score, rank } = stats;
+
+  if (position_count === 0 || z_score === null) {
+    return `${name} doesn't yet have enough resolved positions in the ` +
+      `last 90 days for Sirtio to compute a reliable skill estimate.`;
+  }
+
+  const edgeText = avg_edge_pct !== null
+    ? `${avg_edge_pct >= 0 ? "+" : ""}${avg_edge_pct.toFixed(0)}%`
+    : "an unclear";
+  const posText = `${position_count} resolved position${position_count === 1 ? "" : "s"}`;
+  const rankText = rank !== null ? ` and currently ranks #${rank} on Sirtio's leaderboard` : "";
+
+  let verdict: string;
+  if (z_score >= 6) {
+    verdict = `ranks among the most statistically skilled Polymarket traders we track`;
+  } else if (z_score >= 3) {
+    verdict = `has consistently outperformed the average tracked trader`;
+  } else if (z_score >= 1) {
+    verdict = `shows a real, if more moderate, edge over the average tracked trader`;
+  } else if (z_score >= -1) {
+    verdict = `performs statistically in line with the average tracked trader`;
+  } else if (z_score >= -3) {
+    verdict = `has underperformed the average tracked trader over this window`;
+  } else {
+    verdict = `has significantly underperformed relative to the tracked pool`;
+  }
+
+  return `Over the last 90 days, ${name} closed ${posText} on Polymarket ` +
+    `at an average return of ${edgeText} per position. Based on Sirtio's ` +
+    `Bayesian-shrunk skill model, ${name} ${verdict}${rankText}.`;
+}
+
+type TraderPageProps = {
+  params: Promise<{ wallet: string }>;
+};
+
+export async function generateMetadata({ params }: TraderPageProps) {
+  const { wallet: rawParam } = await params;
+  const wallet = await resolveWallet(decodeURIComponent(rawParam));
+  if (!wallet) {
+    return { title: "Trader Not Found" };
+  }
+  const stats = await getTraderStats(wallet);
+  if (!stats) {
+    return { title: "Trader Not Found" };
+  }
+  const name = getDisplayName(stats.username, stats.wallet);
+  const scoreText =
+    stats.pm_score !== null ? `Sirtio Score: ${stats.pm_score.toFixed(1)}. ` : "";
+  return {
+    title: `${name} — Polymarket Trader Profile`,
+    description:
+      `${scoreText}${name}'s realized PnL, resolved positions, and trading ` +
+      `history on Polymarket, tracked and scored by Sirtio.`,
+  };
+}
+
 export default async function TraderPage({
   params,
-}: {
-  params: Promise<{ wallet: string }>;
-}) {
+}: TraderPageProps) {
   const { wallet: rawParam } = await params;
   const wallet = await resolveWallet(decodeURIComponent(rawParam));
 
@@ -69,9 +137,27 @@ export default async function TraderPage({
     );
   }
 
+  const name = getDisplayName(stats.username, stats.wallet);
+  const traderJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "ProfilePage",
+    name: `${name} — Polymarket Trader Profile`,
+    description:
+      `${name}'s realized PnL, resolved positions, and Sirtio Score on Polymarket.`,
+    mainEntity: {
+      "@type": "Person",
+      name,
+      identifier: stats.wallet,
+    },
+  };
+
   return (
     <div className="min-h-screen">
       <Nav />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(traderJsonLd) }}
+      />
       <section className="max-w-6xl mx-auto px-6 py-16">
         <Link href="/leaderboard" className="text-sm text-accent hover:underline">
           --&gt; Back to leaderboard
@@ -101,6 +187,10 @@ export default async function TraderPage({
             </div>
           )}
         </div>
+
+        <p className="mt-6 text-sm text-muted leading-relaxed max-w-3xl">
+          {traderSummary(stats, name)}
+        </p>
 
         <div className="mt-12 grid grid-cols-2 gap-4 max-w-xl">
           <div className="border border-hairline rounded-lg p-5">

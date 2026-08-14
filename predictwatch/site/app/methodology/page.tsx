@@ -1,6 +1,12 @@
 import Link from "next/link";
 import Nav from "@/components/Nav";
 
+export const metadata = {
+  title: "Methodology",
+  description:
+    "How Sirtio Score works: why realized PnL beats win-rate leaderboards, how bot and market-maker wallets get filtered out, and how trader skill is separated from luck.",
+};
+
 export default function MethodologyPage() {
   return (
     <div className="min-h-screen">
@@ -10,7 +16,7 @@ export default function MethodologyPage() {
           Methodology
         </p>
         <h1 className="font-[family-name:var(--font-display)] text-4xl md:text-5xl leading-tight text-parchment mb-8">
-          The Sirtio Score
+          Why we don't just rank by dollars
         </h1>
         <p className="text-lg text-muted leading-relaxed">
           Every other prediction-market leaderboard sorts by total profit.

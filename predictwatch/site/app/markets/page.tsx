@@ -3,6 +3,12 @@ import ProbabilityBar from "@/components/ProbabilityBar";
 import { getTopMarkets } from "@/lib/queries";
 import { marketSourceUrl } from "@/lib/format";
 
+export const metadata = {
+  title: "Markets",
+  description:
+    "The highest-volume prediction markets across Kalshi and Polymarket, ranked side by side.",
+};
+
 function formatVolume(v: number | null) {
   if (!v) return "$0";
   if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`;

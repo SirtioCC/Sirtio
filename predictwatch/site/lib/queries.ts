@@ -1,4 +1,5 @@
 import sql from "./db";
+import { cache } from "react";
 
 export type Market = {
   source: string;
@@ -180,7 +181,7 @@ export type TraderPosition = {
   end_date: string | null;
 };
 
-export async function getTraderStats(wallet: string): Promise<TraderDetail | null> {
+export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail | null> => {
   const rows = await sql<TraderDetail[]>`
     WITH latest_leaderboard AS (
       SELECT * FROM trader_leaderboard_snapshots
@@ -218,7 +219,7 @@ export async function getTraderStats(wallet: string): Promise<TraderDetail | nul
     z_score: r.z_score !== null ? Number(r.z_score) : null,
     pm_score: r.pm_score !== null ? Number(r.pm_score) : null,
   };
-}
+});
 
 /**
  * Same data-source swap as getLeaderboard/getTraderStats, 2026-08-13 --
@@ -267,7 +268,7 @@ export async function getTraderPositions(wallet: string): Promise<TraderPosition
   `;
 }
 
-export async function resolveWallet(input: string): Promise<string | null> {
+export const resolveWallet = cache(async (input: string): Promise<string | null> => {
   const trimmed = input.trim();
   if (/^0x[a-fA-F0-9]{10,}$/.test(trimmed)) {
     return trimmed.toLowerCase();
@@ -279,4 +280,4 @@ export async function resolveWallet(input: string): Promise<string | null> {
     LIMIT 1
   `;
   return rows.length > 0 ? rows[0].wallet : null;
-}
+});

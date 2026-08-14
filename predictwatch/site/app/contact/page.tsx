@@ -1,5 +1,10 @@
 import Nav from "@/components/Nav";
 
+export const metadata = {
+  title: "Contact",
+  description: "Get in touch with the Sirtio team.",
+};
+
 const CONTACT_EMAIL = "sirtio.enterprise@gmail.com";
 
 export default function ContactPage() {
@@ -14,7 +19,7 @@ export default function ContactPage() {
           Talk to the team behind the numbers
         </h1>
         <p className="text-lg text-muted leading-relaxed">
-          Sirtio is built and run by working analytics professionals --
+          Sirtio is built and run by a working analytics professional --
           not a faceless product team. Every metric on this site, from
           Sirtio Score down to the realized-PnL ledger behind it, is
           designed, tested, and maintained with the same rigor you'd
