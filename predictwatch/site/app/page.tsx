@@ -89,7 +89,7 @@ export default async function Home() {
           {markets.map((m) => (
             <div
               key={`${m.source}-${m.external_id}`}
-              className="grid grid-cols-[1fr_200px_90px] items-center gap-6 py-4 border-b border-hairline"
+              className="grid grid-cols-[1fr_70px] sm:grid-cols-[1fr_200px_90px] items-center gap-3 sm:gap-6 py-4 border-b border-hairline"
             >
               <div>
                 <p className="text-parchment">{m.title}</p>
@@ -111,7 +111,9 @@ export default async function Home() {
                   )}
                 </p>
               </div>
-              <ProbabilityBar yesPriceCents={m.yes_price_cents} hidePrice />
+              <div className="hidden sm:block">
+                <ProbabilityBar yesPriceCents={m.yes_price_cents} hidePrice />
+              </div>
               <span className="font-mono text-sm tabular-nums text-parchment text-right">
                 {m.yes_price_cents !== null ? `${Math.min(100, Math.max(0, m.yes_price_cents)).toFixed(0)}¢` : "--"}
               </span>
@@ -133,7 +135,7 @@ export default async function Home() {
           {leaderboard.map((t, i) => (
             <div
               key={t.wallet}
-              className="grid grid-cols-[40px_1fr_100px_100px] items-center gap-6 py-4 border-b border-hairline"
+              className="grid grid-cols-[28px_1fr_70px] sm:grid-cols-[40px_1fr_100px_100px] items-center gap-3 sm:gap-6 py-4 border-b border-hairline"
             >
               <span className="font-mono text-muted text-sm">
                 {String(i + 1).padStart(2, "0")}
@@ -149,8 +151,8 @@ export default async function Home() {
               <span className="font-mono text-sm text-signal-yes">
                 {t.pm_score !== null ? t.pm_score.toFixed(1) : "--"}
               </span>
-              <span className="font-mono text-sm text-muted text-right">
-                {t.position_count} predictions (90d)
+              <span className="hidden sm:block font-mono text-sm text-muted text-right">
+                {t.position_count} resolved bets (90d)
               </span>
             </div>
           ))}

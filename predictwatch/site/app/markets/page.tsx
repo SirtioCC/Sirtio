@@ -37,15 +37,15 @@ export default async function MarketsPage() {
           </p>
         ) : (
           <div>
-            <div className="grid grid-cols-[1fr_200px_90px] gap-6 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
+            <div className="grid grid-cols-[1fr_70px] sm:grid-cols-[1fr_200px_90px] gap-3 sm:gap-6 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
               <span>Market</span>
-              <span></span>
+              <span className="hidden sm:block"></span>
               <span className="text-right">Yes price</span>
             </div>
             {markets.map((m) => (
               <div
                 key={`${m.source}-${m.external_id}`}
-                className="grid grid-cols-[1fr_200px_90px] items-center gap-6 py-4 border-b border-hairline"
+                className="grid grid-cols-[1fr_70px] sm:grid-cols-[1fr_200px_90px] items-center gap-3 sm:gap-6 py-4 border-b border-hairline"
               >
                 <div>
                   <p className="text-parchment">{m.title}</p>
@@ -68,7 +68,9 @@ export default async function MarketsPage() {
                     )}
                   </p>
                 </div>
-                <ProbabilityBar yesPriceCents={m.yes_price_cents} hidePrice />
+                <div className="hidden sm:block">
+                  <ProbabilityBar yesPriceCents={m.yes_price_cents} hidePrice />
+                </div>
                 <span className="font-mono text-sm tabular-nums text-parchment text-right">
                   {m.yes_price_cents !== null ? `${Math.min(100, Math.max(0, m.yes_price_cents)).toFixed(0)}¢` : "--"}
                 </span>

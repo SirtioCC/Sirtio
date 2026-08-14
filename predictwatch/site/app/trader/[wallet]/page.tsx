@@ -266,17 +266,17 @@ export default async function TraderPage({
             <p className="text-sm text-muted">No positions resolved in the last 90 days for this wallet.</p>
           ) : (
             <div>
-              <div className="grid grid-cols-[1fr_80px_90px_100px_90px] gap-4 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
+              <div className="grid grid-cols-[1fr_90px_80px] sm:grid-cols-[1fr_80px_90px_100px_90px] gap-3 sm:gap-4 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
                 <span>Market</span>
-                <span className="text-right">Side</span>
-                <span className="text-right">Entry</span>
+                <span className="hidden sm:block text-right">Side</span>
+                <span className="hidden sm:block text-right">Entry</span>
                 <span className="text-right">PnL</span>
                 <span className="text-right">Return</span>
               </div>
               {positions.map((p) => {
                 return (
                   <div key={p.condition_id}
-                    className="grid grid-cols-[1fr_80px_90px_100px_90px] items-center gap-4 py-3 border-b border-hairline"
+                    className="grid grid-cols-[1fr_90px_80px] sm:grid-cols-[1fr_80px_90px_100px_90px] items-center gap-3 sm:gap-4 py-3 border-b border-hairline"
                   >
                     <div>
                       <p className="text-sm text-parchment truncate">{p.market_title || "--"}</p>
@@ -286,8 +286,8 @@ export default async function TraderPage({
                           : "Resolved"}
                       </p>
                     </div>
-                    <span className="font-mono text-xs text-muted text-right">{p.outcome || "--"}</span>
-                    <span className="font-mono text-xs text-muted text-right">
+                    <span className="hidden sm:block font-mono text-xs text-muted text-right">{p.outcome || "--"}</span>
+                    <span className="hidden sm:block font-mono text-xs text-muted text-right">
                       {p.avg_price !== null ? `${(p.avg_price * 100).toFixed(0)}c` : "--"}
                     </span>
                     <span className={`font-mono text-xs text-right ${
