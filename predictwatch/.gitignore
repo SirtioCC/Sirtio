@@ -3,3 +3,4 @@ __pycache__/
 .env
 snapshots.db
 .github.zip
+Creds/
