@@ -10,7 +10,7 @@ conn.close()
 print(f"Testing against {len(wallets)} real leaderboard wallets")
 
 try:
-    events, bot_wallets = fetch_polymarket_activity.run(wallets)
+    events, bot_wallets, _watermarks = fetch_polymarket_activity.run(wallets)
     print("--- Activity fetch complete ---")
     if bot_wallets:
         print(f"Bot-capped wallets: {sorted(bot_wallets)}")
@@ -18,8 +18,9 @@ try:
         print(f"{w}: {len(evs)} events")
     print()
     print("--- Now running realized_pnl.run() with FULL traceback on any crash ---")
-    rows = realized_pnl.run(events)
-    print(f"SUCCESS: {len(rows)} total realized PnL rows")
+    rows, open_positions = realized_pnl.run(events)
+    print(f"SUCCESS: {len(rows)} total realized PnL rows, "
+          f"{len(open_positions)} wallets with open positions remaining")
 except Exception:
     print("CRASHED -- full traceback below:")
     traceback.print_exc()

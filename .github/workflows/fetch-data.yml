@@ -6,7 +6,16 @@ on:
     # sane on Supabase's free tier while still building real history
     # over time. Bump back to every 4-6 hours later once there's a
     # reason to need finer-grained intraday snapshots.
-    - cron: "0 11 * * *"  # 11:00 UTC = 7am Eastern (EDT)
+    #
+    # Deliberately NOT on the hour (":00") -- GitHub's own docs warn
+    # the top of every hour is their highest-load window for scheduled
+    # workflows, where runs can be delayed or dropped entirely (not
+    # just late). Confirmed 2026-08-14: this schedule was set 2026-08-11
+    # at "0 11 * * *" and had two full scheduled windows pass (Aug 12,
+    # Aug 13) with zero automatic runs -- workflow_dispatch (manual)
+    # worked fine the whole time, which is the exact documented
+    # top-of-hour symptom pattern, not a config/secret problem.
+    - cron: "17 11 * * *"  # ~11:17 UTC = ~7:17am Eastern (EDT)
   workflow_dispatch: {}  # lets you trigger it manually from the GitHub UI
 
 jobs:

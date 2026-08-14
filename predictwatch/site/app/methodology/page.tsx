@@ -255,25 +255,6 @@ export default function MethodologyPage() {
           <li className="flex gap-3">
             <span className="text-signal-no mt-1">-</span>
             <span>
-              <strong className="text-parchment">
-                Still depends on trader_closed_positions_snapshots,
-                which has a known gap.
-              </strong>{" "}
-              Polymarket's closed-positions endpoint reliably captures
-              wins (a winning position naturally gets redeemed,
-              creating a record) but can miss or undercount losses (a
-              trader who exits a losing position early leaves little
-              or no trace there). Removing win rate from the formula
-              doesn't fix this underlying data gap -- realized PnL
-              figures could still be somewhat inflated for wallets with
-              many early exits. A separate trade-level ledger, built
-              from raw buy/sell/redeem activity, is the real fix for
-              this and is still being worked on.
-            </span>
-          </li>
-          <li className="flex gap-3">
-            <span className="text-signal-no mt-1">-</span>
-            <span>
               <strong className="text-parchment">Directional, not precise.</strong>{" "}
               Read Sirtio Score as "this trader looks more skilled than that
               one," not as a confident numeric ranking down to the

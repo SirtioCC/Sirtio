@@ -73,6 +73,27 @@ export async function getTopMarkets(limit = 20): Promise<Market[]> {
  * 1 position, +$5M, 500% edge scores 3.1, not close to the top).
  * Breakeven (0% edge, $0 total) scores exactly 50, same clean midpoint
  * property as the previous formula.
+ *
+ * DATA SOURCE, updated 2026-08-13: now built from
+ * trader_realized_pnl_events (the trade-level ledger), not
+ * trader_closed_positions_snapshots. The closed-positions table only
+ * reliably captures WINS -- Polymarket's /closed-positions endpoint
+ * has no concept of a position sold early at a loss, or a losing
+ * position simply abandoned (worth $0, nothing to explicitly close).
+ * Verified via a real wallet: 33/33 winning positions and $1.09M
+ * summed from /closed-positions, against a real max around $349K for
+ * the same wallet. The ledger fixes both gaps -- see
+ * fetch_polymarket_activity.py and realized_pnl.py for the full
+ * mechanism (trade-level BUY/SELL/REDEEM walk plus a force-close step
+ * for abandoned-but-resolved positions).
+ *
+ * Aggregation is two-level: PER-POSITION first (grouping every ledger
+ * event for the same wallet+condition_id together, since a partial
+ * sell followed by a later full sell/redeem produces MULTIPLE ledger
+ * rows for what is really one position), THEN per-wallet. This keeps
+ * position_count meaning "distinct positions traded," not "raw ledger
+ * events," and keeps avg_edge_pct a true per-position return rather
+ * than being skewed toward wallets who happened to exit in more pieces.
  */
 export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
   const rows = await sql<LeaderboardTrader[]>`
@@ -80,16 +101,24 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
       SELECT * FROM trader_leaderboard_snapshots
       WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
     ),
+    per_position AS (
+      SELECT
+        wallet,
+        condition_id,
+        SUM(realized_pnl) AS position_pnl,
+        SUM(avg_cost * size) AS position_cost_basis
+      FROM trader_realized_pnl_events
+      WHERE closed_at IS NOT NULL
+        AND closed_at >= (NOW() - INTERVAL '90 days')
+      GROUP BY wallet, condition_id
+    ),
     position_stats AS (
       SELECT
         wallet,
         COUNT(*) AS position_count,
-        AVG(percent_return_approx) AS avg_edge_pct,
-        SUM(realized_pnl) AS realized_pnl_90d
-      FROM trader_closed_positions_snapshots
-      WHERE realized_pnl IS NOT NULL AND realized_pnl != 0
-        AND closed_at IS NOT NULL
-        AND closed_at >= (NOW() - INTERVAL '90 days')
+        AVG(CASE WHEN position_cost_basis > 0 THEN (position_pnl / position_cost_basis) * 100 END) AS avg_edge_pct,
+        SUM(position_pnl) AS realized_pnl_90d
+      FROM per_position
       GROUP BY wallet
     )
     SELECT
@@ -174,16 +203,24 @@ export async function getTraderStats(wallet: string): Promise<TraderDetail | nul
       SELECT * FROM trader_leaderboard_snapshots
       WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
     ),
+    per_position AS (
+      SELECT
+        wallet,
+        condition_id,
+        SUM(realized_pnl) AS position_pnl,
+        SUM(avg_cost * size) AS position_cost_basis
+      FROM trader_realized_pnl_events
+      WHERE closed_at IS NOT NULL
+        AND closed_at >= (NOW() - INTERVAL '90 days')
+      GROUP BY wallet, condition_id
+    ),
     position_stats AS (
       SELECT
         wallet,
         COUNT(*) AS position_count,
-        AVG(percent_return_approx) AS avg_edge_pct,
-        SUM(realized_pnl) AS realized_pnl_90d
-      FROM trader_closed_positions_snapshots
-      WHERE realized_pnl IS NOT NULL AND realized_pnl != 0
-        AND closed_at IS NOT NULL
-        AND closed_at >= (NOW() - INTERVAL '90 days')
+        AVG(CASE WHEN position_cost_basis > 0 THEN (position_pnl / position_cost_basis) * 100 END) AS avg_edge_pct,
+        SUM(position_pnl) AS realized_pnl_90d
+      FROM per_position
       GROUP BY wallet
     ),
     scored AS (
@@ -228,15 +265,49 @@ export async function getTraderStats(wallet: string): Promise<TraderDetail | nul
   return { ...r, pm_score: r.pm_score !== null ? Number(r.pm_score) : null };
 }
 
+/**
+ * Same data-source swap as getLeaderboard/getTraderStats, 2026-08-13 --
+ * the "All positions" list on a trader's page has to match the score
+ * shown above it on the same page. Rendering this from
+ * trader_closed_positions_snapshots while the score comes from the
+ * ledger would show two different position counts/PnL figures on the
+ * same page for the same wallet, which is worse than either being
+ * wrong alone. cur_price/total_bought/end_date aren't rendered by the
+ * trader page (confirmed against app/trader/[wallet]/page.tsx) so
+ * those come back NULL rather than being derived from data the ledger
+ * doesn't naturally have (there's no "current price" concept for a
+ * position built from discrete realized trade/redeem events).
+ */
 export async function getTraderPositions(wallet: string): Promise<TraderPosition[]> {
   return sql<TraderPosition[]>`
-    SELECT condition_id, market_title, outcome, avg_price, cur_price,
-           total_bought, realized_pnl, percent_return_approx, closed_at, end_date
-    FROM trader_closed_positions_snapshots
-    WHERE wallet = ${wallet}
-      AND realized_pnl IS NOT NULL AND realized_pnl != 0
-      AND closed_at IS NOT NULL
-      AND closed_at >= (NOW() - INTERVAL '90 days')
+    WITH per_position AS (
+      SELECT
+        condition_id,
+        MAX(market_title) AS market_title,
+        MAX(outcome) AS outcome,
+        SUM(avg_cost * size) / NULLIF(SUM(size), 0) AS avg_price,
+        SUM(realized_pnl) AS realized_pnl,
+        SUM(avg_cost * size) AS position_cost_basis,
+        MAX(closed_at) AS closed_at
+      FROM trader_realized_pnl_events
+      WHERE wallet = ${wallet}
+        AND closed_at IS NOT NULL
+        AND closed_at >= (NOW() - INTERVAL '90 days')
+      GROUP BY condition_id
+      HAVING SUM(realized_pnl) != 0
+    )
+    SELECT
+      condition_id,
+      market_title,
+      outcome,
+      avg_price,
+      NULL::double precision AS cur_price,
+      NULL::double precision AS total_bought,
+      realized_pnl,
+      CASE WHEN position_cost_basis > 0 THEN (realized_pnl / position_cost_basis) * 100 END AS percent_return_approx,
+      closed_at,
+      NULL::text AS end_date
+    FROM per_position
     ORDER BY closed_at DESC NULLS LAST
   `;
 }

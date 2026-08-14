@@ -258,20 +258,40 @@ LOOKBACK_DAYS = 2 * 365  # cap how far back cost-basis history is fetched.
 # avoiding an unbounded fetch back to Polymarket's 2020 launch.
 
 
-def run(wallets: list[str]):
+def run(wallets: list[str], watermarks: dict[str, int] | None = None):
     """
     Fetch + normalize activity for a list of wallets. Returns
-    (result, bot_wallets) -- result is a dict keyed by wallet -> chrono-
-    logical list of normalized events (the ledger step needs each
-    wallet's full history intact, not a flattened cross-wallet list).
-    bot_wallets is the set of wallets that exceeded ACTIVITY_EVENT_CAP.
+    (result, bot_wallets, new_watermarks).
+
+    watermarks: optional dict of wallet -> last successfully-fetched
+    Unix timestamp (loaded from Supabase's wallet_fetch_state table by
+    the caller). A wallet present here only fetches NEW activity since
+    that timestamp, instead of re-walking up to LOOKBACK_DAYS of full
+    history from scratch every single run -- this is what makes the
+    daily scheduled run cheap after the first time a wallet is seen.
+    A wallet absent from watermarks (never successfully fetched before)
+    gets the full LOOKBACK_DAYS backfill, same as always.
+
+    new_watermarks: wallet -> timestamp to persist for next run, for
+    every wallet whose fetch didn't raise an exception -- even one that
+    found zero new events, since that still confirms "nothing new
+    happened for this wallet up through this point in time" and should
+    still move the starting point forward next run. A wallet's
+    watermark is deliberately NOT included here if its fetch raised an
+    exception, so a failed run retries from the same starting point
+    next time instead of silently skipping whatever it failed to get.
     """
+    watermarks = watermarks or {}
     from datetime import timedelta
-    earliest_ts = int((datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).timestamp())
+    default_earliest_ts = int((datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).timestamp())
+    fetch_start_ts = int(datetime.now(timezone.utc).timestamp())
 
     result = {}
     bot_wallets = set()
+    new_watermarks = {}
     for i, wallet in enumerate(wallets, 1):
+        is_incremental = wallet in watermarks
+        earliest_ts = watermarks.get(wallet, default_earliest_ts)
         try:
             raw, hit_bot_cap = fetch_activity_for_wallet(wallet, earliest_ts=earliest_ts)
             if hit_bot_cap:
@@ -280,17 +300,19 @@ def run(wallets: list[str]):
             usable = [e for e in normalized if e["event_type"] is not None]
             usable.sort(key=lambda e: e["timestamp"] or 0)
             result[wallet] = usable
-            print(f"  [{i}/{len(wallets)}] {wallet}: {len(usable)} trade/redeem events")
+            new_watermarks[wallet] = fetch_start_ts
+            mode = "incremental" if is_incremental else "full backfill"
+            print(f"  [{i}/{len(wallets)}] {wallet}: {len(usable)} trade/redeem events ({mode})")
         except Exception as e:
             print(f"  [{i}/{len(wallets)}] {wallet}: FAILED -- {e}")
             result[wallet] = []
         time.sleep(0.3)
-    return result, bot_wallets
+    return result, bot_wallets, new_watermarks
 
 
 if __name__ == "__main__":
     test_wallet = "0x7ad71d79a3bb90d0a87a06500fa0fe11663842aa"
-    events, bots = run([test_wallet])
+    events, bots, watermarks_out = run([test_wallet])
     rows = events[test_wallet]
     print(f"Fetched {len(rows)} events for {test_wallet}")
     for r in rows[:5]:

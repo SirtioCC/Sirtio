@@ -100,6 +100,33 @@ CREATE INDEX IF NOT EXISTS idx_realized_pnl_closed_at ON trader_realized_pnl_eve
 -- inserting a new duplicate every single pipeline run.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_realized_pnl_wallet_asset_txhash
     ON trader_realized_pnl_events(wallet, asset, transaction_hash);
+
+-- Tracks the latest activity timestamp successfully fetched per wallet,
+-- so the daily run only pulls NEW trade/redeem events since last time
+-- instead of re-walking up to 2 years of history from scratch every
+-- single day. A wallet with no row here is treated as brand new (full
+-- 2-year backfill); a wallet with a row only fetches forward from
+-- last_activity_ts. See fetch_polymarket_activity.py's run() for how
+-- this gets used.
+CREATE TABLE IF NOT EXISTS wallet_fetch_state (
+    wallet TEXT PRIMARY KEY,
+    last_activity_ts BIGINT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+
+-- Persists each wallet's open (never sold/redeemed) position ledger
+-- state between runs -- tokens/cost basis per asset, as a JSON blob
+-- (structure mirrors realized_pnl.py's in-memory `positions` dict).
+-- Required for incremental fetching to stay correct: a position bought
+-- before this run's watermark and sold/redeemed after it needs its
+-- real prior cost basis restored, not reconstructed from zero, or its
+-- realized PnL would be silently skipped/wrong. See realized_pnl.py's
+-- build_realized_pnl_events for the full reasoning.
+CREATE TABLE IF NOT EXISTS wallet_open_ledger (
+    wallet TEXT PRIMARY KEY,
+    positions_json JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
 """
 
 INSERT_SQL = """
@@ -216,6 +243,132 @@ def save_realized_pnl_to_supabase(rows):
         conn.close()
 
 
+def get_wallet_watermarks(wallets: list[str]) -> dict:
+    """
+    Load last-successfully-fetched activity timestamps for the given
+    wallets from wallet_fetch_state. A wallet with no row here has
+    never been successfully fetched before -- fetch_polymarket_activity
+    treats an absent wallet as "needs full backfill" automatically, so
+    this only needs to return whatever DOES exist, not fill in gaps.
+    """
+    if not wallets:
+        return {}
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA)
+            cur.execute(
+                "SELECT wallet, last_activity_ts FROM wallet_fetch_state WHERE wallet = ANY(%s)",
+                (wallets,),
+            )
+            return {row[0]: row[1] for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+def save_wallet_watermarks(watermarks: dict):
+    """
+    Upsert new last-fetched timestamps so next run only pulls activity
+    since this point for each wallet, instead of re-walking full
+    history every day.
+    """
+    if not watermarks:
+        return
+    now_iso = datetime.now(timezone.utc).isoformat()
+    rows = [
+        {"wallet": w, "last_activity_ts": ts, "updated_at": now_iso}
+        for w, ts in watermarks.items()
+    ]
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA)
+            psycopg2.extras.execute_batch(
+                cur,
+                """
+                INSERT INTO wallet_fetch_state (wallet, last_activity_ts, updated_at)
+                VALUES (%(wallet)s, %(last_activity_ts)s, %(updated_at)s)
+                ON CONFLICT (wallet) DO UPDATE SET
+                    last_activity_ts = EXCLUDED.last_activity_ts,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                rows,
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_wallet_open_ledger(wallets: list[str]) -> dict:
+    """
+    Load each wallet's persisted open-position ledger state (see
+    wallet_open_ledger in SCHEMA for why this exists). Returns
+    wallet -> {asset: pos_dict}, matching realized_pnl.py's expected
+    initial_open_positions shape exactly.
+    """
+    if not wallets:
+        return {}
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA)
+            cur.execute(
+                "SELECT wallet, positions_json FROM wallet_open_ledger WHERE wallet = ANY(%s)",
+                (wallets,),
+            )
+            return {row[0]: row[1] for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+def save_wallet_open_ledger(new_open_positions: dict, processed_wallets: list):
+    """
+    Overwrite each wallet's open-ledger state with the freshly computed
+    result from realized_pnl.run() -- NOT a merge, since the returned
+    dict already IS the correct merge of prior state + this run's new
+    events (see realized_pnl.run's docstring).
+
+    processed_wallets: every wallet actually run through realized_pnl
+    this pass (activity_wallets from the caller). Any wallet in this
+    list but absent from new_open_positions had all its open positions
+    resolved/force-closed this run -- its old wallet_open_ledger row is
+    deleted rather than left stale, since a leftover row would make a
+    future run wrongly restore already-settled positions as if still
+    open. A wallet NOT in processed_wallets (e.g. skipped this run
+    entirely) is left untouched either way.
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(SCHEMA)
+            if new_open_positions:
+                now_iso = datetime.now(timezone.utc).isoformat()
+                rows = [
+                    {"wallet": w, "positions_json": psycopg2.extras.Json(positions), "updated_at": now_iso}
+                    for w, positions in new_open_positions.items()
+                ]
+                psycopg2.extras.execute_batch(
+                    cur,
+                    """
+                    INSERT INTO wallet_open_ledger (wallet, positions_json, updated_at)
+                    VALUES (%(wallet)s, %(positions_json)s, %(updated_at)s)
+                    ON CONFLICT (wallet) DO UPDATE SET
+                        positions_json = EXCLUDED.positions_json,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    rows,
+                )
+            now_fully_closed = [w for w in processed_wallets if w not in new_open_positions]
+            if now_fully_closed:
+                cur.execute(
+                    "DELETE FROM wallet_open_ledger WHERE wallet = ANY(%s)",
+                    (now_fully_closed,),
+                )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def run():
     all_rows = []
 
@@ -294,18 +447,36 @@ def run():
     # realized_pnl.py for the full reasoning). This is what the site's
     # "90-day PnL" leaderboard column should be computed from, not the
     # closed-positions table above, which only reflects wins.
+    #
+    # INCREMENTAL FETCHING, added 2026-08-14: without this, every run
+    # (including a scheduled daily one) re-walks up to LOOKBACK_DAYS
+    # (2 years) of full history for every wallet, forever -- that's what
+    # drove pipeline runtime to 4.5+ hours before this fix. Watermarks
+    # (wallet_fetch_state) track the last successfully-fetched point per
+    # wallet, so a wallet seen before only fetches NEW activity since
+    # then. A wallet seen for the first time still gets a full backfill.
     try:
         if activity_wallets:
-            print(f"Fetching full trade/redeem activity for {len(activity_wallets)} leaderboard wallets...")
-            wallet_events, activity_bot_wallets = fetch_polymarket_activity.run(activity_wallets)
+            watermarks = get_wallet_watermarks(activity_wallets)
+            new_wallet_count = len(activity_wallets) - len(watermarks)
+            print(f"Fetching trade/redeem activity for {len(activity_wallets)} leaderboard wallets "
+                  f"({len(watermarks)} incremental, {new_wallet_count} full backfill)...")
+            wallet_events, activity_bot_wallets, new_watermarks = fetch_polymarket_activity.run(
+                activity_wallets, watermarks=watermarks
+            )
             if activity_bot_wallets:
                 print(f"  {len(activity_bot_wallets)} additional wallet(s) hit the "
                       f"activity event cap (likely bot, caught here rather than by "
                       f"the closed-positions cap): {sorted(activity_bot_wallets)}")
             total_events = sum(len(v) for v in wallet_events.values())
             print(f"Polymarket activity: {total_events} trade/redeem events across {len(activity_wallets)} wallets")
-            print("Building realized PnL ledger (including force-close of abandoned resolved positions)...")
-            realized_rows = realized_pnl.run(wallet_events)
+
+            open_ledger = get_wallet_open_ledger(activity_wallets)
+            print(f"Building realized PnL ledger ({len(open_ledger)} wallets carrying forward "
+                  f"open-position state, including force-close of abandoned resolved positions)...")
+            realized_rows, new_open_positions = realized_pnl.run(
+                wallet_events, initial_open_positions=open_ledger
+            )
             print(f"Realized PnL: {len(realized_rows)} events across {len(activity_wallets)} wallets")
             if realized_rows:
                 now = datetime.now(timezone.utc).isoformat()
@@ -313,6 +484,13 @@ def run():
                     r["fetched_at"] = now
                 save_realized_pnl_to_supabase(realized_rows)
                 print(f"Saved {len(realized_rows)} realized PnL rows to Supabase")
+            save_wallet_open_ledger(new_open_positions, activity_wallets)
+            print(f"Saved open-ledger state for next run "
+                  f"({len(new_open_positions)} wallets still have open positions)")
+            if new_watermarks:
+                save_wallet_watermarks(new_watermarks)
+                print(f"Saved fetch watermarks for {len(new_watermarks)} wallets "
+                      f"(next run will only fetch activity newer than this)")
     except Exception as e:
         print(f"Polymarket trade-level realized PnL fetch failed: {e}")
 

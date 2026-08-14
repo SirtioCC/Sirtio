@@ -71,7 +71,7 @@ def fetch_resolution_by_condition_ids(condition_ids: list[str]) -> dict:
     return result
 
 
-def build_realized_pnl_events(wallet: str, events: list[dict]):
+def build_realized_pnl_events(wallet: str, events: list[dict], initial_positions: dict = None):
     """
     Walk one wallet's chronological TRADE_BUY / TRADE_SELL / REDEEM
     events and emit a realized-PnL row for every SELL and REDEEM.
@@ -81,8 +81,20 @@ def build_realized_pnl_events(wallet: str, events: list[dict]):
     candidates for force-closing against real market resolution --
     handled separately in force_close_abandoned_positions, so this
     function stays a pure trade-ledger walk with no network calls.
+
+    initial_positions: optional starting ledger state (wallet's open
+    positions carried over from a PREVIOUS run) -- required for
+    correctness under incremental fetching. Without this, a position
+    bought before the fetch's watermark and sold/redeemed after it
+    would have its SELL/REDEEM event present but its BUY missing (it's
+    older than what got fetched this run), and get silently skipped as
+    "nothing on the ledger to sell against" -- reproducing the exact
+    survivorship gap this ledger exists to fix, just via a different
+    mechanism. Passing in the wallet's real prior open-position state
+    (persisted in wallet_open_ledger between runs) keeps cost-basis
+    continuity intact across incremental runs.
     """
-    positions = {}  # asset -> running ledger state
+    positions = {k: dict(v) for k, v in initial_positions.items()} if initial_positions else {}
     realized = []
 
     for e in events:
@@ -204,20 +216,47 @@ def force_close_abandoned_positions(wallet: str, open_positions: dict):
     return realized
 
 
-def run(wallet_events: dict, resolve_abandoned: bool = True):
+def run(wallet_events: dict, resolve_abandoned: bool = True, initial_open_positions: dict = None):
     """
     wallet_events: dict from fetch_polymarket_activity.run() --
-    wallet -> chronological event list.
-    Returns a flat list of realized-PnL rows across all wallets.
+    wallet -> chronological event list (under incremental fetching,
+    this is only NEW events since the wallet's last watermark, not
+    full history).
+
+    initial_open_positions: optional dict of wallet -> {asset: pos}
+    (loaded from wallet_open_ledger) -- each wallet's carried-over open
+    position state from the previous run. Required for correctness
+    once fetching is incremental; see build_realized_pnl_events for why.
+
+    Returns (all_rows, new_open_positions) -- new_open_positions is
+    wallet -> {asset: pos} to persist for next run (the caller should
+    overwrite each wallet's stored state with this, not merge it --
+    it already IS the merge of prior state + this run's new events).
+    A wallet with no new events this run still carries its existing
+    open state forward unchanged, since nothing happened to change it.
     """
+    initial_open_positions = initial_open_positions or {}
     all_rows = []
+    new_open_positions = {}
     for i, (wallet, events) in enumerate(wallet_events.items(), 1):
         if not events:
+            existing = initial_open_positions.get(wallet)
+            if existing:
+                new_open_positions[wallet] = existing
             continue
-        realized, open_positions = build_realized_pnl_events(wallet, events)
+        wallet_initial = initial_open_positions.get(wallet)
+        realized, open_positions = build_realized_pnl_events(wallet, events, initial_positions=wallet_initial)
         if resolve_abandoned and open_positions:
-            realized.extend(force_close_abandoned_positions(wallet, open_positions))
+            force_closed = force_close_abandoned_positions(wallet, open_positions)
+            realized.extend(force_closed)
+            # Force-closed assets are now resolved -- drop them from the
+            # carried-forward open state so we don't keep re-checking
+            # (and re-force-closing) an already-settled position forever.
+            force_closed_assets = {r["asset"] for r in force_closed}
+            open_positions = {a: p for a, p in open_positions.items() if a not in force_closed_assets}
         all_rows.extend(realized)
+        if open_positions:
+            new_open_positions[wallet] = open_positions
         print(f"  [{i}/{len(wallet_events)}] {wallet}: {len(realized)} realized PnL events "
-              f"({len(open_positions)} abandoned positions checked)")
-    return all_rows
+              f"({len(open_positions)} still open)")
+    return all_rows, new_open_positions
