@@ -2,6 +2,7 @@ import Nav from "@/components/Nav";
 import ProbabilityBar from "@/components/ProbabilityBar";
 import { getTopMarkets } from "@/lib/queries";
 import { marketSourceUrl } from "@/lib/format";
+export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "Markets",

@@ -3,6 +3,7 @@ import Nav from "@/components/Nav";
 import CopyableWallet from "@/components/CopyableWallet";
 import { getLeaderboard } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
+export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "Trader Leaderboard",

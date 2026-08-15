@@ -3,6 +3,7 @@ import Nav from "@/components/Nav";
 import ProbabilityBar from "@/components/ProbabilityBar";
 import { getTopMarkets, getLeaderboard, getHeroStats } from "@/lib/queries";
 import { getDisplayName, marketSourceUrl } from "@/lib/format";
+export const dynamic = "force-dynamic";
 
 function formatVolume(v: number | null) {
   if (!v) return "$0";

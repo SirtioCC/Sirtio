@@ -3,6 +3,7 @@ import Nav from "@/components/Nav";
 import CopyableWallet from "@/components/CopyableWallet";
 import { getTraderStats, getTraderPositions, resolveWallet } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
+export const dynamic = "force-dynamic";
 
 function formatMoney(v: number | null) {
   if (v === null) return "--";
