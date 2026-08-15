@@ -18,7 +18,7 @@ export type Market = {
 };
 
 export type LeaderboardTrader = {
-  rank: number;
+  rank: number | null;
   wallet: string;
   username: string | null;
   volume: number;
@@ -109,6 +109,49 @@ export async function getTopMarkets(limit = 20): Promise<Market[]> {
  * logistic curve). z_score is the underlying statistic tier cutoffs
  * are set against -- see scoreTier() in the leaderboard page.
  */
+export async function getFollowedTraders(wallets: string[]): Promise<LeaderboardTrader[]> {
+  if (wallets.length === 0) return [];
+  const rows = await sql<LeaderboardTrader[]>`
+    WITH latest_leaderboard AS (
+      SELECT * FROM trader_leaderboard_snapshots
+      WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
+    ),
+    ranked AS (
+      SELECT
+        l.wallet,
+        ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC) AS rank
+      FROM latest_leaderboard l
+      LEFT JOIN trader_sirtio_scores s ON s.wallet = l.wallet
+    ),
+    latest_username AS (
+      SELECT DISTINCT ON (wallet) wallet, username
+      FROM trader_leaderboard_snapshots
+      WHERE wallet = ANY(${wallets})
+      ORDER BY wallet, fetched_at DESC
+    )
+    SELECT
+      r.rank,
+      u.wallet,
+      u.username,
+      NULL::float8 AS volume,
+      s.realized_pnl_90d,
+      COALESCE(s.position_count, 0) AS position_count,
+      s.avg_edge_pct,
+      s.z_score,
+      s.sirtio_score AS pm_score
+    FROM latest_username u
+    LEFT JOIN trader_sirtio_scores s ON s.wallet = u.wallet
+    LEFT JOIN ranked r ON r.wallet = u.wallet
+    ORDER BY s.sirtio_score DESC NULLS LAST
+  `;
+  return rows.map((r) => ({
+    ...r,
+    avg_edge_pct: r.avg_edge_pct !== null ? Number(r.avg_edge_pct) : null,
+    z_score: r.z_score !== null ? Number(r.z_score) : null,
+    pm_score: r.pm_score !== null ? Number(r.pm_score) : null,
+  }));
+}
+
 export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
   const rows = await sql<LeaderboardTrader[]>`
     WITH latest_leaderboard AS (

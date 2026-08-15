@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import TraderSearch from "@/components/TraderSearch";
+import { createClient } from "@/lib/supabase/client";
+import { logout } from "@/app/auth/actions";
 
 const NAV_LINKS = [
   { href: "/markets", label: "Markets" },
@@ -14,6 +16,23 @@ const NAV_LINKS = [
 
 export default function Nav() {
   const [open, setOpen] = useState(false);
+  const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => setLoggedIn(!!user));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (_event, session) => setLoggedIn(!!session?.user)
+    );
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const authLinks = loggedIn
+    ? [{ href: "/following", label: "Following" }]
+    : [
+        { href: "/login", label: "Log In" },
+        { href: "/signup", label: "Sign Up" },
+      ];
 
   return (
     <header className="border-b border-hairline">
@@ -35,6 +54,18 @@ export default function Nav() {
               {link.label}
             </Link>
           ))}
+          {authLinks.map((link) => (
+            <Link key={link.href} href={link.href} className="hover:text-parchment transition-colors">
+              {link.label}
+            </Link>
+          ))}
+          {loggedIn && (
+            <form action={logout}>
+              <button type="submit" className="hover:text-parchment transition-colors">
+                Log Out
+              </button>
+            </form>
+          )}
         </div>
 
         {/* Mobile: hamburger toggle */}
@@ -75,6 +106,23 @@ export default function Nav() {
                 {link.label}
               </Link>
             ))}
+            {authLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                onClick={() => setOpen(false)}
+                className="hover:text-parchment transition-colors"
+              >
+                {link.label}
+              </Link>
+            ))}
+            {loggedIn && (
+              <form action={logout}>
+                <button type="submit" className="text-left hover:text-parchment transition-colors">
+                  Log Out
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}

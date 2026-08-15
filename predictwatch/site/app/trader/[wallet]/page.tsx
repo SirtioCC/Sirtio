@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Nav from "@/components/Nav";
 import CopyableWallet from "@/components/CopyableWallet";
+import FollowButton from "@/components/FollowButton";
 import { getTraderStats, getTraderPositions, resolveWallet } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 export const dynamic = "force-dynamic";
@@ -165,9 +166,12 @@ export default async function TraderPage({
 
         <div className="mt-6 flex items-start justify-between flex-wrap gap-6">
           <div>
-            <h1 className="font-[family-name:var(--font-title)] font-bold text-4xl text-parchment mb-2">
-              {getDisplayName(stats.username, stats.wallet)}
-            </h1>
+            <div className="flex items-center gap-4 mb-2">
+              <h1 className="font-[family-name:var(--font-title)] font-bold text-4xl text-parchment">
+                {getDisplayName(stats.username, stats.wallet)}
+              </h1>
+              <FollowButton wallet={stats.wallet} />
+            </div>
             <div className="flex items-center gap-3">
               <CopyableWallet wallet={stats.wallet} />
               <a href={polymarketProfileUrl(stats.wallet)} target="_blank" rel="noopener noreferrer"
