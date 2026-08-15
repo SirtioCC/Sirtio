@@ -73,17 +73,17 @@ export default async function LeaderboardPage() {
           </p>
         ) : (
           <div>
-            <div className="grid grid-cols-[28px_1fr_90px] sm:grid-cols-[40px_1fr_150px_140px] gap-3 sm:gap-6 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
+            <div className="grid grid-cols-[28px_1fr_90px] sm:grid-cols-[40px_360px_1fr_1fr] gap-3 sm:gap-6 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
               <span>#</span>
               <span>Trader</span>
-              <span className="text-right">Sirtio Score</span>
-              <span className="hidden sm:block text-right">Resolved Bets (Last 90D)</span>
+              <span className="text-center">Sirtio Score</span>
+              <span className="hidden sm:block text-center">Resolved Bets (Last 90D)</span>
             </div>
             {traders
               .filter((t) => t.pm_score !== null || t.position_count > 0)
               .map((t, i) => (
               <div key={t.wallet}
-                className="grid grid-cols-[28px_1fr_90px] sm:grid-cols-[40px_1fr_150px_140px] items-center gap-3 sm:gap-6 py-4 border-b border-hairline"
+                className="grid grid-cols-[28px_1fr_90px] sm:grid-cols-[40px_360px_1fr_1fr] items-center gap-3 sm:gap-6 py-4 border-b border-hairline"
               >
                 <span className="font-mono text-muted text-sm">
                   {String(i + 1).padStart(2, "0")}
@@ -105,7 +105,7 @@ export default async function LeaderboardPage() {
                     </a>
                   </div>
                 </div>
-                <div className="text-right">
+                <div className="text-center">
                   <span className="font-mono text-sm text-signal-yes">
                     {t.pm_score !== null ? t.pm_score.toFixed(1) : "--"}
                   </span>
@@ -115,7 +115,7 @@ export default async function LeaderboardPage() {
                     </p>
                   )}
                 </div>
-                <span className="hidden sm:block font-mono text-sm text-muted text-right">
+                <span className="hidden sm:block font-mono text-sm text-muted text-center">
                   {t.position_count}
                 </span>
               </div>
