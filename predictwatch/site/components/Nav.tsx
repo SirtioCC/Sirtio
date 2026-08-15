@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import TraderSearch from "@/components/TraderSearch";
 
 const NAV_LINKS = [
@@ -17,12 +18,15 @@ export default function Nav() {
   return (
     <header className="border-b border-hairline">
       <nav className="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between gap-6">
-        <Link href="/" className="font-[family-name:var(--font-display)] italic text-xl tracking-tight text-parchment shrink-0">
-          Sirtio
+        <Link href="/" className="flex items-center gap-2.5 shrink-0">
+          <Image src="/logo.png" alt="Sirtio" width={44} height={44} priority />
+          <span className="font-[family-name:var(--font-display)] italic text-2xl tracking-tight text-parchment">
+            Sirtio
+          </span>
         </Link>
 
         {/* Desktop: full inline layout, unchanged */}
-        <div className="hidden md:block flex-1 max-w-xs">
+        <div className="hidden md:block flex-1 max-w-sm">
           <TraderSearch compact />
         </div>
         <div className="hidden md:flex items-center gap-8 text-sm text-muted shrink-0">

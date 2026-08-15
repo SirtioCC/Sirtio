@@ -11,10 +11,7 @@ export const metadata = {
 
 function formatVolume(v: number | null) {
   if (!v) return "$0";
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`;
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;
-  return `$${v.toFixed(0)}`;
+  return `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 export default async function MarketsPage() {
@@ -24,7 +21,7 @@ export default async function MarketsPage() {
     <div className="min-h-screen">
       <Nav />
       <section className="max-w-6xl mx-auto px-6 py-16">
-        <h1 className="font-[family-name:var(--font-display)] text-4xl text-parchment mb-2">
+        <h1 className="font-[family-name:var(--font-title)] font-bold text-4xl text-parchment mb-2">
           Markets
         </h1>
         <p className="text-muted mb-10">

@@ -8,9 +8,7 @@ function formatMoney(v: number | null) {
   if (v === null) return "--";
   const sign = v >= 0 ? "+" : "-";
   const abs = Math.abs(v);
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
-  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(0)}K`;
-  return `${sign}$${abs.toFixed(0)}`;
+  return `${sign}$${abs.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
 // Real, varied per-trader summary text -- not a single templated
@@ -28,34 +26,34 @@ function traderSummary(stats: {
   const { position_count, avg_edge_pct, z_score, rank } = stats;
 
   if (position_count === 0 || z_score === null) {
-    return `${name} doesn't yet have enough resolved positions in the ` +
-      `last 90 days for Sirtio to compute a reliable skill estimate.`;
+    return `${name} doesn't have enough resolved positions in the ` +
+      `last 90 days yet for Sirtio to compute a reliable skill estimate.`;
   }
 
   const edgeText = avg_edge_pct !== null
     ? `${avg_edge_pct >= 0 ? "+" : ""}${avg_edge_pct.toFixed(0)}%`
     : "an unclear";
   const posText = `${position_count} resolved position${position_count === 1 ? "" : "s"}`;
-  const rankText = rank !== null ? ` and currently ranks #${rank} on Sirtio's leaderboard` : "";
+  const rankText = rank !== null ? ` and currently sits at rank #${rank} on Sirtio's leaderboard` : "";
 
   let verdict: string;
   if (z_score >= 6) {
-    verdict = `ranks among the most statistically skilled Polymarket traders we track`;
+    verdict = `ranks among the most skilled Polymarket traders we track`;
   } else if (z_score >= 3) {
     verdict = `has consistently outperformed the average tracked trader`;
   } else if (z_score >= 1) {
-    verdict = `shows a real, if more moderate, edge over the average tracked trader`;
+    verdict = `shows a real edge over the average tracked trader, though a more moderate one`;
   } else if (z_score >= -1) {
-    verdict = `performs statistically in line with the average tracked trader`;
+    verdict = `performs about in line with the average tracked trader`;
   } else if (z_score >= -3) {
     verdict = `has underperformed the average tracked trader over this window`;
   } else {
-    verdict = `has significantly underperformed relative to the tracked pool`;
+    verdict = `has clearly underperformed the rest of the tracked pool`;
   }
 
   return `Over the last 90 days, ${name} closed ${posText} on Polymarket ` +
     `at an average return of ${edgeText} per position. Based on Sirtio's ` +
-    `Bayesian-shrunk skill model, ${name} ${verdict}${rankText}.`;
+    `skill model, ${name} ${verdict}${rankText}.`;
 }
 
 type TraderPageProps = {
@@ -76,7 +74,7 @@ export async function generateMetadata({ params }: TraderPageProps) {
   const scoreText =
     stats.pm_score !== null ? `Sirtio Score: ${stats.pm_score.toFixed(1)}. ` : "";
   return {
-    title: `${name} — Polymarket Trader Profile`,
+    title: `${name}: Polymarket Trader Profile`,
     description:
       `${scoreText}${name}'s realized PnL, resolved positions, and trading ` +
       `history on Polymarket, tracked and scored by Sirtio.`,
@@ -99,7 +97,8 @@ export default async function TraderPage({
           </p>
           <p className="text-muted mb-8">
             We only track wallets that have appeared on Polymarket's
-            top-25 leaderboard so far. Try a wallet address, or browse
+            Monthly leaderboard (their top 100 traders by profit over
+            the last 30 days) so far. Try a wallet address, or browse
             the full leaderboard below.
           </p>
           <Link href="/leaderboard" className="text-accent hover:underline">
@@ -126,8 +125,8 @@ export default async function TraderPage({
             No data for this wallet yet
           </p>
           <p className="text-muted mb-8">
-            This wallet isn't currently on Polymarket's top-25
-            leaderboard, so we don't have position data for it.
+            This wallet isn't currently on Polymarket's Monthly
+            leaderboard, so we don't have position data for it yet.
           </p>
           <Link href="/leaderboard" className="text-accent hover:underline">
             View the leaderboard --&gt;
@@ -141,7 +140,7 @@ export default async function TraderPage({
   const traderJsonLd = {
     "@context": "https://schema.org",
     "@type": "ProfilePage",
-    name: `${name} — Polymarket Trader Profile`,
+    name: `${name}: Polymarket Trader Profile`,
     description:
       `${name}'s realized PnL, resolved positions, and Sirtio Score on Polymarket.`,
     mainEntity: {
@@ -165,7 +164,7 @@ export default async function TraderPage({
 
         <div className="mt-6 flex items-start justify-between flex-wrap gap-6">
           <div>
-            <h1 className="font-[family-name:var(--font-display)] text-4xl text-parchment mb-2">
+            <h1 className="font-[family-name:var(--font-title)] font-bold text-4xl text-parchment mb-2">
               {getDisplayName(stats.username, stats.wallet)}
             </h1>
             <div className="flex items-center gap-3">
@@ -212,7 +211,7 @@ export default async function TraderPage({
         <div className="mt-16">
           <div className="flex items-baseline justify-between mb-6">
             <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment">
-              Sirtio Score breakdown
+              Sirtio Score Breakdown
             </h2>
             <p className="font-mono text-3xl text-signal-yes">
               {stats.pm_score !== null ? stats.pm_score.toFixed(1) : "--"}
@@ -230,15 +229,15 @@ export default async function TraderPage({
                 {stats.avg_edge_pct !== null
                   ? `${stats.avg_edge_pct >= 0 ? "+" : ""}${stats.avg_edge_pct.toFixed(0)}%`
                   : "--"}
-                . Sirtio Score doesn't use that raw number directly --
-                it's first blended toward the average trader's return,
-                proportional to how little or much track record exists
-                for this wallet, then measured against how uncertain
-                that blended estimate still is. A thin sample or an
-                inconsistent track record both widen that uncertainty
-                and pull the score toward 50 (breakeven); a large,
-                consistent sample lets the score move further from it
-                in either direction.
+                . Sirtio Score doesn't use that raw number
+                directly. It's first blended toward the average
+                trader's return, in proportion to how much track
+                record exists for this wallet, then measured against
+                how uncertain that blended estimate still is. A thin
+                sample or an inconsistent track record both widen that
+                uncertainty and pull the score toward 50 (breakeven).
+                A large, consistent sample lets the score move further
+                from 50 in either direction.
               </p>
               <div className="flex items-baseline gap-3">
                 <span className="font-mono text-xs uppercase tracking-wide text-muted">
@@ -252,15 +251,58 @@ export default async function TraderPage({
             </div>
           ) : (
             <p className="text-sm text-muted">
-              No resolved positions yet -- Sirtio Score needs at least some
-              position history to compute.
+              No resolved positions yet. Sirtio Score needs at least
+              some position history to compute.
             </p>
           )}
         </div>
 
+        {positions.length > 0 && (() => {
+          const sorted = [...positions].sort((a, b) => (b.realized_pnl ?? 0) - (a.realized_pnl ?? 0));
+          const topWins = sorted.filter((p) => (p.realized_pnl ?? 0) > 0).slice(0, 5);
+          const topLosses = sorted.filter((p) => (p.realized_pnl ?? 0) < 0).slice(-5).reverse();
+
+          const renderRow = (p: typeof positions[number], isWin: boolean) => (
+            <div key={p.condition_id} className="flex items-center justify-between gap-4 py-3 border-b border-hairline">
+              <div className="min-w-0">
+                <p className="text-sm text-parchment truncate">{p.market_title || "--"}</p>
+                <p className="text-xs text-muted mt-0.5 truncate">{p.outcome || "--"}</p>
+              </div>
+              <span className={`font-mono text-sm text-right shrink-0 ${isWin ? "text-signal-yes" : "text-signal-no"}`}>
+                {formatMoney(p.realized_pnl)}
+              </span>
+            </div>
+          );
+
+          return (
+            <div className="mt-16 grid md:grid-cols-2 gap-10">
+              <div>
+                <h2 className="font-[family-name:var(--font-display)] text-xl text-parchment mb-4">
+                  Top 5 Wins (Last 90 Days)
+                </h2>
+                {topWins.length > 0 ? (
+                  <div>{topWins.map((p) => renderRow(p, true))}</div>
+                ) : (
+                  <p className="text-sm text-muted">No winning positions in this window.</p>
+                )}
+              </div>
+              <div>
+                <h2 className="font-[family-name:var(--font-display)] text-xl text-parchment mb-4">
+                  Top 5 Losses (Last 90 Days)
+                </h2>
+                {topLosses.length > 0 ? (
+                  <div>{topLosses.map((p) => renderRow(p, false))}</div>
+                ) : (
+                  <p className="text-sm text-muted">No losing positions in this window.</p>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="mt-16">
           <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mb-6">
-            All positions (last 90 days)
+            All Positions (Last 90 Days)
           </h2>
           {positions.length === 0 ? (
             <p className="text-sm text-muted">No positions resolved in the last 90 days for this wallet.</p>

@@ -7,7 +7,7 @@ import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 export const metadata = {
   title: "Trader Leaderboard",
   description:
-    "The top Polymarket traders ranked by Sirtio Score -- a statistical model built to separate real trading skill from lucky one-off bets, using realized PnL and Bayesian shrinkage.",
+    "The top Polymarket traders ranked by Sirtio Score, a statistical model built to separate real trading skill from lucky one-off bets, using realized PnL and Bayesian shrinkage.",
 };
 
 // Sirtio Score is built so 50 represents a truly break-even trader
@@ -35,36 +35,48 @@ function scoreTier(zScore: number | null): string | null {
 
 export default async function LeaderboardPage() {
   const traders = await getLeaderboard(100);
+  const scoredTraders = traders.filter(
+    (t) => t.pm_score !== null || t.position_count > 0
+  );
 
   return (
     <div className="min-h-screen">
       <Nav />
       <section className="max-w-6xl mx-auto px-6 py-16">
-        <h1 className="font-[family-name:var(--font-display)] text-4xl text-parchment mb-2">
-          Trader leaderboard
+        <h1 className="font-[family-name:var(--font-title)] font-bold text-4xl text-parchment mb-2">
+          Trader Leaderboard
         </h1>
         <p className="text-muted mb-2">
-          Polymarket only -- Kalshi doesn't expose public trader data.
+          Polymarket only. Kalshi doesn't expose public trader data.
           This leaderboard draws from Polymarket's own public
-          "Monthly" leaderboard (top 100 traders by profit over the
-          last 30 days) -- not every Polymarket trader, and not an
-          all-time ranking. Once we have that pool of 100 wallets, we
-          independently score each one using their 90-day realized
-          PnL history to compute Sirtio Score, which is a different
+          "Monthly" leaderboard, the top 100 traders by profit over
+          the last 30 days. It's not every Polymarket trader, and
+          it's not an all-time ranking. Once we have that pool of 100
+          wallets, we score each one on their own using 90 days of
+          realized PnL history to compute Sirtio Score, a different
           window than the monthly pull used to find them.
         </p>
         <p className="text-muted/70 mb-10">
-          Sirtio Score is built entirely from realized PnL -- average edge
-          per position and total realized PnL magnitude, both damped
-          by sample size --{" "}
+          Sirtio Score is built entirely from realized PnL: average
+          edge per position and total realized PnL magnitude, both
+          damped by sample size.{" "}
           <Link href="/methodology" className="text-accent hover:underline">
-            read the full methodology
+            Read the full methodology
           </Link>
-          . It needs more resolved history to validate -- read it as
-          directional, not precise. Names are shown as-is from
-          Polymarket; click a wallet address to copy it, a trader's
-          name to view their Sirtio profile, or "View on
-          Polymarket" to see their public Polymarket profile.
+          . It needs more resolved history to fully validate, so read
+          it as directional rather than precise. Names are shown as-is
+          from Polymarket. Click a wallet address to copy it, click a
+          trader's name to view their Sirtio profile, or click "View
+          on Polymarket" to see their public Polymarket profile.
+        </p>
+        <p className="text-muted/70 mb-10">
+          This list currently shows the top {scoredTraders.length} traders
+          who meet the minimum requirements for a Sirtio Score. That
+          number moves day to day. A trader can be excluded because
+          they have no resolved positions in the last 90 days, or
+          because their trading activity looks automated, which we
+          filter out before scoring. They stay part of Polymarket's
+          tracked pool and may show up here once they qualify.
         </p>
 
         {traders.length === 0 ? (
@@ -79,9 +91,7 @@ export default async function LeaderboardPage() {
               <span className="text-center">Sirtio Score</span>
               <span className="hidden sm:block text-center">Resolved Bets (Last 90D)</span>
             </div>
-            {traders
-              .filter((t) => t.pm_score !== null || t.position_count > 0)
-              .map((t, i) => (
+            {scoredTraders.map((t, i) => (
               <div key={t.wallet}
                 className="grid grid-cols-[28px_1fr_90px] sm:grid-cols-[40px_360px_1fr_1fr] items-center gap-3 sm:gap-6 py-4 border-b border-hairline"
               >
@@ -120,17 +130,6 @@ export default async function LeaderboardPage() {
                 </span>
               </div>
             ))}
-            {traders.some((t) => t.pm_score === null && t.position_count === 0) && (
-              <p className="text-xs text-muted/70 leading-relaxed mt-6 pt-6 border-t border-hairline">
-                Every trader beyond this rank does not currently meet
-                the minimum requirements for a Sirtio Score. This can
-                happen for a few reasons -- no resolved positions in
-                the last 90 days, or trading activity consistent with
-                automated/bot behavior, which we filter out before
-                scoring. They remain part of Polymarket's tracked pool
-                and may appear here once they qualify.
-              </p>
-            )}
           </div>
         )}
       </section>

@@ -15,23 +15,25 @@ export default function ContactPage() {
         <p className="font-mono text-xs uppercase tracking-widest text-accent mb-6">
           Contact
         </p>
-        <h1 className="font-[family-name:var(--font-display)] text-4xl md:text-5xl leading-tight text-parchment mb-8">
-          Talk to the team behind the numbers
+        <h1 className="font-[family-name:var(--font-title)] font-bold text-4xl md:text-5xl leading-tight text-parchment mb-8">
+          Behind the Numbers at Sirtio
         </h1>
         <p className="text-lg text-muted leading-relaxed">
-          Sirtio is built and run by a working analytics professional --
-          not a faceless product team. Every metric on this site, from
-          Sirtio Score down to the realized-PnL ledger behind it, is
-          designed, tested, and maintained with the same rigor you'd
-          expect from institutional-grade market analysis. If you have
-          a question, a data request, a partnership idea, or you've
-          spotted something that doesn't look right, we want to hear
-          about it directly.
+          Sirtio is built and run by analytics professionals with
+          experience working with real data and real business
+          problems. Every metric on the site, from Sirtio Score to the
+          realized PnL ledger behind it, is built, tested, and
+          maintained with a focus on accuracy and transparency.
+        </p>
+        <p className="text-lg text-muted leading-relaxed mt-4">
+          Have a question, a data request, a partnership idea, or
+          something that does not look right? Reach out. We want to
+          hear from you.
         </p>
 
         <div className="mt-16 border border-hairline rounded-lg p-8">
           <p className="font-mono text-xs uppercase tracking-wide text-muted mb-3">
-            Email us directly
+            Email Us Directly
           </p>
           <a
             href={`mailto:${CONTACT_EMAIL}`}
@@ -41,7 +43,7 @@ export default function ContactPage() {
           </a>
           <p className="text-sm text-muted mt-4 leading-relaxed">
             Whether it's enterprise data access, a methodology
-            question, press, or general feedback -- reach out and a
+            question, press, or general feedback, reach out and a
             real person will get back to you.
           </p>
         </div>
@@ -49,26 +51,26 @@ export default function ContactPage() {
         <div className="mt-16 grid md:grid-cols-3 gap-6">
           <div className="border border-hairline rounded-lg p-6">
             <p className="text-sm text-parchment font-medium mb-2">
-              Enterprise &amp; data access
+              Business Inquiries
             </p>
             <p className="text-sm text-muted leading-relaxed">
-              Looking for deeper access to Sirtio's trader analytics,
-              scoring history, or raw datasets? Let's talk.
+              Interested in working with Sirtio, or want to talk about
+              what we're building? Reach out and let's see if it's a
+              fit.
             </p>
           </div>
           <div className="border border-hairline rounded-lg p-6">
             <p className="text-sm text-parchment font-medium mb-2">
-              Methodology questions
+              Methodology Questions
             </p>
             <p className="text-sm text-muted leading-relaxed">
-              Curious how Sirtio Score, market coverage, or accuracy
-              tracking actually works under the hood? We're glad to
-              walk through it.
+              Curious how Sirtio Score or our data sourcing actually
+              works under the hood? We're glad to walk through it.
             </p>
           </div>
           <div className="border border-hairline rounded-lg p-6">
             <p className="text-sm text-parchment font-medium mb-2">
-              Report an issue
+              Report an Issue
             </p>
             <p className="text-sm text-muted leading-relaxed">
               Spotted a bad link, an off number, or something that

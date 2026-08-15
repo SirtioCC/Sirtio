@@ -19,9 +19,9 @@ export default function TraderSearch({ compact = false }: { compact?: boolean })
       <input type="text"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Search leaderboard..."
+        placeholder="Search wallet or username..."
         className={`bg-surface border border-hairline rounded-md text-parchment placeholder:text-muted focus:outline-none focus:border-accent transition-colors ${
-          compact ? "text-sm px-3 py-1.5 w-48" : "px-4 py-2 w-full"
+          compact ? "text-sm px-3 py-1.5 w-full" : "px-4 py-2 w-full"
         }`}
       />
     </form>

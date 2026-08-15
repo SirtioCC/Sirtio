@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Fraunces, Inter, IBM_Plex_Mono } from "next/font/google";
+import { Fraunces, Inter, IBM_Plex_Mono, Raleway } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
@@ -7,6 +7,13 @@ const fraunces = Fraunces({
   subsets: ["latin"],
   variable: "--font-display",
   weight: ["400", "500", "600"],
+  style: ["normal", "italic"],
+});
+
+const raleway = Raleway({
+  subsets: ["latin"],
+  variable: "--font-title",
+  weight: ["500", "600", "700"],
   style: ["normal", "italic"],
 });
 
@@ -27,7 +34,7 @@ const SITE_URL = "https://www.sirtio.com";
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Sirtio — Prediction market intelligence",
+    default: "Sirtio: Prediction Market Intelligence",
     template: "%s | Sirtio",
   },
   description:
@@ -43,14 +50,14 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     siteName: "Sirtio",
-    title: "Sirtio — Prediction market intelligence",
+    title: "Sirtio: Prediction Market Intelligence",
     description:
       "Market data and trader skill scores across Kalshi and Polymarket. Is this trader actually good, or did they get lucky?",
     url: SITE_URL,
   },
   twitter: {
     card: "summary_large_image",
-    title: "Sirtio — Prediction market intelligence",
+    title: "Sirtio: Prediction Market Intelligence",
     description:
       "Market data and trader skill scores across Kalshi and Polymarket. Is this trader actually good, or did they get lucky?",
   },
@@ -80,7 +87,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${fraunces.variable} ${inter.variable} ${plexMono.variable} antialiased`}
+        className={`${fraunces.variable} ${raleway.variable} ${inter.variable} ${plexMono.variable} antialiased`}
       >
         <script
           type="application/ld+json"
