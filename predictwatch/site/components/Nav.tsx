@@ -7,7 +7,7 @@ import TraderSearch from "@/components/TraderSearch";
 
 const NAV_LINKS = [
   { href: "/markets", label: "Markets" },
-  { href: "/leaderboard", label: "Traders" },
+  { href: "/leaderboard", label: "Leaderboard" },
   { href: "/methodology", label: "Methodology" },
   { href: "/contact", label: "Contact" },
 ];

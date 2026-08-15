@@ -192,7 +192,7 @@ export default async function TraderPage({
           {traderSummary(stats, name)}
         </p>
 
-        <div className="mt-12 grid grid-cols-2 gap-4 max-w-xl">
+        <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
           <div className="border border-hairline rounded-lg p-5">
             <p className="text-xs uppercase tracking-wide text-muted mb-2">
               Avg edge (per position)
@@ -321,7 +321,7 @@ export default async function TraderPage({
                   <div key={p.condition_id}
                     className="grid grid-cols-[1fr_90px_80px] sm:grid-cols-[1fr_80px_90px_100px_90px] items-center gap-3 sm:gap-4 py-3 border-b border-hairline"
                   >
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-sm text-parchment truncate">{p.market_title || "--"}</p>
                       <p className="text-xs text-muted mt-0.5">
                         {p.closed_at
