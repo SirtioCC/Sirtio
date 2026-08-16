@@ -342,12 +342,29 @@ export const resolveWallet = cache(async (input: string): Promise<string | null>
  * page also happens to call it within one render pass.
  */
 export const getLastRefresh = cache(async (): Promise<string | null> => {
-  const rows = await sql<{ completed_at: string }[]>`
-    SELECT completed_at
-    FROM pipeline_runs
-    WHERE status = 'success'
-    ORDER BY completed_at DESC
-    LIMIT 1
-  `;
-  return rows.length > 0 ? rows[0].completed_at : null;
+  // Wrapped in try/catch, added 2026-08-16 after a build-time crash:
+  // this renders inside Nav, which is now on every page, so a slow or
+  // unreachable DB connection during Vercel's BUILD step (not just
+  // runtime) can fail the entire page's static generation -- confirmed
+  // live via a "canceling statement due to statement timeout" error
+  // that killed the whole /methodology build even though that page's
+  // actual content has nothing to do with the database. A freshness
+  // badge failing to load should never be able to take down a page
+  // build. Falling back to null renders nothing (same as "no
+  // successful run recorded yet" -- see DataFreshnessClient.tsx),
+  // which is the correct degrade: worst case the badge is briefly
+  // missing, not the whole site failing to deploy.
+  try {
+    const rows = await sql<{ completed_at: string }[]>`
+      SELECT completed_at
+      FROM pipeline_runs
+      WHERE status = 'success'
+      ORDER BY completed_at DESC
+      LIMIT 1
+    `;
+    return rows.length > 0 ? rows[0].completed_at : null;
+  } catch (e) {
+    console.error("getLastRefresh failed, degrading gracefully:", e);
+    return null;
+  }
 });
