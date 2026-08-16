@@ -314,7 +314,7 @@ export default async function TraderPage({
             const scoreText = stats.pm_score !== null ? stats.pm_score.toFixed(1) : "--";
             return (
             <div className="space-y-6">
-              <div className="bg-surface-raised rounded-lg px-6 py-6">
+              <div className="bg-surface-raised border border-accent/40 rounded-lg px-6 py-6">
                 <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-1">
                   <div className="flex-1 text-center">
                     <p className="text-xs uppercase tracking-wide text-muted mb-1">Raw avg return</p>
@@ -419,7 +419,7 @@ export default async function TraderPage({
           {positions.length === 0 ? (
             <p className="text-sm text-body">No positions resolved in the last 90 days for this wallet.</p>
           ) : (
-            <div className="bg-surface rounded-lg px-4 sm:px-6 pt-2">
+            <div className="bg-surface border border-accent/40 rounded-lg px-4 sm:px-6 pt-2">
               <div className="grid grid-cols-[1fr_90px_80px] sm:grid-cols-[1fr_80px_90px_100px_90px] gap-3 sm:gap-4 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
                 <span>Market</span>
                 <span className="hidden sm:block text-right">Side</span>
