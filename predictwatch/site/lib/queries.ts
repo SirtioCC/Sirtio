@@ -324,3 +324,30 @@ export const resolveWallet = cache(async (input: string): Promise<string | null>
   `;
   return rows.length > 0 ? rows[0].wallet : null;
 });
+
+/**
+ * Backs the site-wide "Data last refreshed" indicator, added 2026-08-16.
+ * Deliberately reads pipeline_runs (a real per-run outcome record) and
+ * NOT MAX(fetched_at) on any individual table -- every stage in
+ * run_pipeline.py's run() already catches its own exceptions and
+ * continues (a Kalshi failure shouldn't block Polymarket, etc.), so a
+ * given table's fetched_at can look fresh even on a run where some
+ * other stage failed. status='success' is only written by
+ * run_pipeline.py once EVERY stage completes cleanly -- a 'running' or
+ * 'failed' row is intentionally excluded here, so this always reflects
+ * the last run the site can actually trust as complete. Wrapped in
+ * cache() like getTraderStats/resolveWallet above, since this will
+ * likely get called once per page render from a shared layout-level
+ * component -- avoids a duplicate query if anything else on the same
+ * page also happens to call it within one render pass.
+ */
+export const getLastRefresh = cache(async (): Promise<string | null> => {
+  const rows = await sql<{ completed_at: string }[]>`
+    SELECT completed_at
+    FROM pipeline_runs
+    WHERE status = 'success'
+    ORDER BY completed_at DESC
+    LIMIT 1
+  `;
+  return rows.length > 0 ? rows[0].completed_at : null;
+});
