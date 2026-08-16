@@ -31,7 +31,7 @@ on:
     # until this can be replaced with an external trigger (hitting
     # workflow_dispatch on a real schedule from outside GitHub) instead
     # of continuing to depend on GitHub's own scheduler for this repo.
-    - cron: "35 7 * * *"  # 07:35 UTC nominal -> actual run expected ~7am Eastern given the confirmed ~3h25m delay
+    - cron: "17 */2 * * *"
   workflow_dispatch: {}  # lets you trigger it manually from the GitHub UI
 
 jobs:
