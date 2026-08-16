@@ -4,7 +4,19 @@ import CopyableWallet from "@/components/CopyableWallet";
 import FollowButton from "@/components/FollowButton";
 import { getTraderStats, getTraderPositions, resolveWallet } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
-export const dynamic = "force-dynamic";
+// Was force-dynamic (fresh Supabase query on every single request) --
+// switched to a 5-minute revalidation window 2026-08-16 after this
+// hit Supabase's free-tier egress cap (115% of 5GB in one billing
+// cycle). This is the highest-traffic route on the site AND every
+// individual trader page is indexed in sitemap.xml, so search
+// crawlers alone were re-querying Supabase on every crawl pass, on
+// top of real visitors. The pipeline only writes new position/score
+// data once a day, so a fresh query on every page view was always
+// more freshness than the underlying data could actually provide --
+// this trades a worst-case 5-minute staleness window for Vercel
+// serving cached HTML to almost all traffic instead of hitting
+// Supabase every time. See leaderboard/page.tsx for the same change.
+export const revalidate = 300;
 
 function formatMoney(v: number | null) {
   if (v === null) return "--";

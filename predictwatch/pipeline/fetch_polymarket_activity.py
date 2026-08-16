@@ -1,8 +1,9 @@
 """
-Fetch a wallet's raw on-chain TRADE and REDEEM activity from
-Polymarket's Data API -- the actual event-level ledger needed to
-compute REAL realized PnL (including early-exit losses), not the
-survivorship-biased summary from /closed-positions.
+Fetch a wallet's raw on-chain TRADE, REDEEM, SPLIT, and MERGE activity
+from Polymarket's Data API -- the actual event-level ledger needed to
+compute REAL realized PnL (including early-exit losses AND losses/gains
+realized via split/merge), not the survivorship-biased summary from
+/closed-positions.
 
 WHY THIS EXISTS: /closed-positions only reflects positions closed via
 market resolution/redemption. A trader who sells a losing position
@@ -11,9 +12,10 @@ there at all -- that loss genuinely happened, but the endpoint has no
 concept of it. Verified via a real wallet: 33/33 winning positions
 and $1.09M summed from /closed-positions, against Polymarket's own
 site showing a real max around $349K for the same wallet. Rebuilding
-PnL from trade-level BUY/SELL/REDEEM events, with a real cost-basis
-ledger (see realized_pnl.py), is the only way to capture losses that
-were realized by selling rather than by losing at resolution.
+PnL from trade-level BUY/SELL/REDEEM/SPLIT/MERGE events, with a real
+cost-basis ledger (see realized_pnl.py), is the only way to capture
+losses that were realized by selling or merging rather than by losing
+at resolution.
 
 PAGINATION: confirmed via Polymarket's own official docs -- offset
 pagination on /activity is capped around 5000; requests past that are
@@ -37,8 +39,29 @@ basis from that position's original purchase, which may be older.
 The 90-day filter gets applied later, to the realized events the
 ledger produces, not to the raw trade fetch itself.
 
+SPLIT/MERGE ADDED (2026-08-16): confirmed live against a real wallet
+that SPLIT/MERGE rows carry asset="" and outcomeIndex=999 (Polymarket's
+sentinel for "applies to the whole market, not one outcome token") --
+unlike TRADE/REDEEM rows, which always have a real asset id. Also
+confirmed a single transactionHash can cover MULTIPLE conditionIds in
+one MERGE transaction (a wallet merged 12 different markets in one tx)
+-- transaction_hash alone is NOT a safe unique key for these rows the
+way it is for TRADE/REDEEM; realized_pnl.py disambiguates by appending
+condition_id. CHECK your trader_realized_pnl_events table's actual
+unique constraint before this runs against production -- if it's a
+plain unique index on transaction_hash alone, MERGE rows sharing a real
+(non-synthetic) tx hash across markets will collide on insert.
+
+NOTE: including SPLIT/MERGE in the fetch means wallets that do a lot of
+split/merge arbitrage will hit ACTIVITY_EVENT_CAP (bot detection) more
+easily than before, since it now counts SPLIT/MERGE rows too, not just
+TRADE/REDEEM. This is arguably correct (heavy split/merge activity is
+itself a bot signal) but is a behavior change worth knowing about --
+a wallet previously under the cap on TRADE/REDEEM alone may now trip it.
+
 Schema confirmed against Polymarket's public Data API docs
-(GET /activity) -- verified 2026-08-12.
+(GET /activity) -- verified 2026-08-12. SPLIT/MERGE shape confirmed
+live 2026-08-16.
 """
 import time
 import requests
@@ -48,15 +71,16 @@ ACTIVITY_URL = "https://data-api.polymarket.com/activity"
 PAGE_LIMIT = 500  # API max, confirmed in docs
 OFFSET_CAP = 5000  # confirmed via Polymarket's own docs
 ACTIVITY_EVENT_CAP = 3000  # a wallet with more than this many raw
-# TRADE/REDEEM events across the lookback window isn't a human placing
-# predictions -- almost certainly a market-making/arbitrage bot. This
-# is DIFFERENT from the closed-positions bot cap (which counts RESOLVED
-# POSITIONS in a 90-day window) -- a bot can have very few resolved
-# positions while still generating thousands of raw trade events (e.g.
-# repeatedly buying/selling the same market, or many small partial
-# fills), so the closed-positions cap alone doesn't catch this pattern.
-# Confirmed live 2026-08-13: wallet 0xa9c4b118...c5e7433 had only 254
-# closed positions (well under that cap) but 8451+ activity events.
+# TRADE/REDEEM/SPLIT/MERGE events across the lookback window isn't a
+# human placing predictions -- almost certainly a market-making/
+# arbitrage bot. This is DIFFERENT from the closed-positions bot cap
+# (which counts RESOLVED POSITIONS in a 90-day window) -- a bot can
+# have very few resolved positions while still generating thousands of
+# raw trade events (e.g. repeatedly buying/selling the same market, or
+# many small partial fills), so the closed-positions cap alone doesn't
+# catch this pattern. Confirmed live 2026-08-13: wallet
+# 0xa9c4b118...c5e7433 had only 254 closed positions (well under that
+# cap) but 8451+ activity events.
 RATE_LIMIT_MAX_RETRIES = 5
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -118,7 +142,7 @@ def _fetch_window(wallet: str, start_ts: int, end_ts: int):
             return events, True
         params = {
             "user": wallet,
-            "type": "TRADE,REDEEM",
+            "type": "TRADE,REDEEM,SPLIT,MERGE",
             "limit": PAGE_LIMIT,
             "offset": offset,
             "start": start_ts,
@@ -153,12 +177,12 @@ def _fetch_window(wallet: str, start_ts: int, end_ts: int):
 
 def fetch_activity_for_wallet(wallet: str, earliest_ts: int = 0):
     """
-    Fetch a wallet's full TRADE/REDEEM history by walking backward
-    through time in windows, each independently offset-paginated.
-    Starts with a 60-day window; any window that still hits the
-    offset cap gets halved and retried, so even a wallet with an
-    extremely dense trading history in a short span still gets
-    fully captured rather than silently truncated.
+    Fetch a wallet's full TRADE/REDEEM/SPLIT/MERGE history by walking
+    backward through time in windows, each independently offset-
+    paginated. Starts with a 60-day window; any window that still hits
+    the offset cap gets halved and retried, so even a wallet with an
+    extremely dense trading history in a short span still gets fully
+    captured rather than silently truncated.
 
     Returns (events, hit_bot_cap) -- hit_bot_cap=True means the
     cumulative event count crossed ACTIVITY_EVENT_CAP and the walk was
@@ -206,8 +230,9 @@ def fetch_activity_for_wallet(wallet: str, earliest_ts: int = 0):
 
         if len(all_events) > ACTIVITY_EVENT_CAP:
             hit_bot_cap = True
-            print(f"    {wallet} exceeded {ACTIVITY_EVENT_CAP} trade/redeem "
-                  f"events (likely bot) -- stopping early at {len(all_events)}.")
+            print(f"    {wallet} exceeded {ACTIVITY_EVENT_CAP} trade/redeem/"
+                  f"split/merge events (likely bot) -- stopping early at "
+                  f"{len(all_events)}.")
             break
 
         end_ts = start_ts
@@ -220,8 +245,15 @@ def normalize_activity_event(wallet: str, e: dict) -> dict:
     """
     Normalize one activity event into the shape realized_pnl.py's
     ledger expects. event_type distinguishes TRADE_BUY / TRADE_SELL /
-    REDEEM up front so the ledger doesn't need to re-inspect raw
-    Polymarket fields.
+    REDEEM / SPLIT / MERGE up front so the ledger doesn't need to
+    re-inspect raw Polymarket fields.
+
+    SPLIT/MERGE rows come back from Polymarket with asset="" (empty
+    string, not null) and outcomeIndex=999 -- confirmed live 2026-08-16
+    -- since those events apply to the whole market (both outcome
+    tokens equally), not one specific token. Normalized to None here so
+    downstream code can use a single "falsy means unknown" check
+    instead of handling "" as a special case.
     """
     raw_type = e.get("type")
     side = e.get("side")
@@ -231,18 +263,28 @@ def normalize_activity_event(wallet: str, e: dict) -> dict:
         event_type = "TRADE_BUY"
     elif raw_type == "TRADE" and side == "SELL":
         event_type = "TRADE_SELL"
+    elif raw_type == "SPLIT":
+        event_type = "SPLIT"
+    elif raw_type == "MERGE":
+        event_type = "MERGE"
     else:
         event_type = None
 
+    outcome_index = e.get("outcomeIndex")
+    if outcome_index == 999:  # Polymarket's sentinel for SPLIT/MERGE
+        outcome_index = None
+
     return {
         "wallet": wallet,
-        "asset": e.get("asset"),
+        "asset": e.get("asset") or None,  # "" -> None for SPLIT/MERGE
         "condition_id": e.get("conditionId"),
-        "outcome": e.get("outcome"),
-        "outcome_index": e.get("outcomeIndex"),
+        "outcome": e.get("outcome") or None,
+        "outcome_index": outcome_index,
         "event_type": event_type,
         "price": e.get("price"),
         "size": e.get("size"),
+        "usdc_size": e.get("usdcSize"),  # meaningful for SPLIT/MERGE;
+                                          # not previously extracted
         "timestamp": e.get("timestamp"),
         "title": e.get("title"),
         "transaction_hash": e.get("transactionHash"),
@@ -302,7 +344,8 @@ def run(wallets: list[str], watermarks: dict[str, int] | None = None):
             result[wallet] = usable
             new_watermarks[wallet] = fetch_start_ts
             mode = "incremental" if is_incremental else "full backfill"
-            print(f"  [{i}/{len(wallets)}] {wallet}: {len(usable)} trade/redeem events ({mode})")
+            print(f"  [{i}/{len(wallets)}] {wallet}: {len(usable)} trade/redeem/"
+                  f"split/merge events ({mode})")
         except Exception as e:
             print(f"  [{i}/{len(wallets)}] {wallet}: FAILED -- {e}")
             result[wallet] = []

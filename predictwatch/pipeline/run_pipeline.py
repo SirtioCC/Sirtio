@@ -68,6 +68,26 @@ CREATE TABLE IF NOT EXISTS trader_leaderboard_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_wallet ON trader_leaderboard_snapshots(wallet);
 CREATE INDEX IF NOT EXISTS idx_leaderboard_fetched_at ON trader_leaderboard_snapshots(fetched_at);
+-- Was append-only (a new row per wallet every single run, forever) --
+-- same unbounded-growth pattern as market_snapshots before its
+-- 2026-08-14 fix, just never patched here. Contributed to hitting
+-- Supabase's free-tier Database Size cap (98% of 0.5GB) alongside the
+-- egress cap fix on 2026-08-16. Switched to one row per (source,
+-- wallet), upserted in place.
+-- REQUIRES a ONE-TIME manual cleanup in Supabase first -- this table
+-- almost certainly already has duplicate (source, wallet) pairs from
+-- every past daily run, and CREATE UNIQUE INDEX fails outright against
+-- existing duplicates (same gotcha documented on market_snapshots
+-- above). Run this in the Supabase SQL editor BEFORE deploying the
+-- pipeline change below, or every run will fail at cur.execute(SCHEMA):
+--
+--   DELETE FROM trader_leaderboard_snapshots a USING trader_leaderboard_snapshots b
+--   WHERE a.source = b.source AND a.wallet = b.wallet
+--   AND a.fetched_at < b.fetched_at;
+--
+-- (keeps only the most-recent row per source+wallet, deletes the rest)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_leaderboard_source_wallet
+    ON trader_leaderboard_snapshots(source, wallet);
 
 CREATE TABLE IF NOT EXISTS trader_closed_positions_snapshots (
     id BIGSERIAL PRIMARY KEY,
@@ -194,8 +214,14 @@ ON CONFLICT (source, external_id) DO UPDATE SET
 
 LEADERBOARD_INSERT_SQL = """
 INSERT INTO trader_leaderboard_snapshots
-(rank, wallet, username, volume, pnl, fetched_at)
-VALUES (%(rank)s, %(wallet)s, %(username)s, %(volume)s, %(pnl)s, %(fetched_at)s)
+(source, rank, wallet, username, volume, pnl, fetched_at)
+VALUES (%(source)s, %(rank)s, %(wallet)s, %(username)s, %(volume)s, %(pnl)s, %(fetched_at)s)
+ON CONFLICT (source, wallet) DO UPDATE SET
+    rank = EXCLUDED.rank,
+    username = EXCLUDED.username,
+    volume = EXCLUDED.volume,
+    pnl = EXCLUDED.pnl,
+    fetched_at = EXCLUDED.fetched_at
 """
 
 CLOSED_POSITIONS_INSERT_SQL = """
@@ -265,6 +291,12 @@ def save_to_supabase(rows):
 
 
 def save_leaderboard_to_supabase(rows):
+    # source defaulted here rather than assumed present on each row --
+    # fetch_polymarket_leaderboard.py's exact row shape wasn't in hand
+    # when this upsert was added, and the new SQL below requires the
+    # key. Safe no-op if rows already include it.
+    for r in rows:
+        r.setdefault("source", "polymarket")
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -517,9 +549,18 @@ def run():
             print(f"Fetching closed positions for {len(wallets)} leaderboard wallets...")
             closed_rows, bot_wallets = fetch_polymarket_closed_positions.run(wallets)
             print(f"Polymarket closed positions: {len(closed_rows)} rows across {len(wallets)} wallets")
-            if closed_rows:
-                save_closed_positions_to_supabase(closed_rows)
-                print(f"Saved {len(closed_rows)} closed position rows to Supabase")
+            # NOTE: no longer saved to Supabase as of 2026-08-16.
+            # trader_closed_positions_snapshots was 357MB (73% of the
+            # entire 0.5GB free-tier Database Size cap) despite nothing
+            # on the site reading it -- the site moved off this table
+            # on 2026-08-13 (see site/lib/queries.ts's comments on
+            # getTraderStats/getTraderPositions) in favor of
+            # trader_realized_pnl_events, which doesn't share this
+            # table's survivorship bias. closed_rows is kept in memory
+            # here only because bot_wallets (below) is derived from it
+            # during this same fetch -- the persisted copy was pure
+            # unused storage, same category as trader_positions_snapshots,
+            # removed 2026-08-13 for the same reason.
     except Exception as e:
         print(f"Polymarket closed positions fetch failed: {e}")
         closed_rows, bot_wallets = [], set()
