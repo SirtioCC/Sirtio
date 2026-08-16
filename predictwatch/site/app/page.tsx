@@ -50,6 +50,11 @@ export default async function Home() {
               doesn't fall for it. We statistically discount luck and
               reward consistency, so the traders on top actually earned it.
             </p>
+            <p className="mt-4 text-sm text-muted/70 max-w-xl leading-relaxed">
+              Not a $200/year copy-trade tool for whale hunters. Sirtio is
+              for the casual trader who just wants to know who's actually
+              good, so you can decide for yourself who to tail.
+            </p>
             <div className="mt-10 flex gap-4">
               <Link
                 href="/leaderboard"
