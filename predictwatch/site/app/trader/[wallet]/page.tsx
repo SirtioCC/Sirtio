@@ -268,19 +268,24 @@ export default async function TraderPage({
           const topLosses = sorted.filter((p) => (p.realized_pnl ?? 0) < 0).slice(-5).reverse();
 
           const renderRow = (p: typeof positions[number], isWin: boolean) => (
-            <div key={p.condition_id} className="flex items-center justify-between gap-4 py-3 border-b border-hairline">
+            <div key={p.condition_id}
+              className="grid grid-cols-[1fr_75px_55px] items-center gap-2 py-3 border-b border-hairline"
+            >
               <div className="min-w-0">
                 <p className="text-sm text-parchment truncate">{p.market_title || "--"}</p>
                 <p className="text-xs text-muted mt-0.5 truncate">{p.outcome || "--"}</p>
               </div>
-              <span className={`font-mono text-sm text-right shrink-0 ${isWin ? "text-signal-yes" : "text-signal-no"}`}>
+              <span className={`font-mono text-xs text-right ${isWin ? "text-signal-yes" : "text-signal-no"}`}>
                 {formatMoney(p.realized_pnl)}
+              </span>
+              <span className={`font-mono text-xs text-right ${isWin ? "text-signal-yes" : "text-signal-no"}`}>
+                {p.percent_return_approx !== null ? `${p.percent_return_approx.toFixed(0)}%` : "--"}
               </span>
             </div>
           );
 
           return (
-            <div className="mt-16 grid md:grid-cols-2 gap-10">
+            <div className="mt-16 grid grid-cols-1 md:grid-cols-2 gap-10">
               <div>
                 <h2 className="font-[family-name:var(--font-display)] text-xl text-parchment mb-4">
                   Top 5 Wins (Last 90 Days)

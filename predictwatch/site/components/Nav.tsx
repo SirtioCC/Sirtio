@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
 import TraderSearch from "@/components/TraderSearch";
 import { createClient } from "@/lib/supabase/client";
 import { logout } from "@/app/auth/actions";
@@ -20,9 +21,9 @@ export default function Nav() {
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getUser().then(({ data: { user } }) => setLoggedIn(!!user));
+    supabase.auth.getUser().then(({ data: { user } }: { data: { user: User | null } }) => setLoggedIn(!!user));
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => setLoggedIn(!!session?.user)
+      (_event: AuthChangeEvent, session: Session | null) => setLoggedIn(!!session?.user)
     );
     return () => subscription.unsubscribe();
   }, []);

@@ -35,7 +35,7 @@ export default async function FollowingPage() {
     .select("wallet")
     .eq("user_id", user.id);
 
-  const wallets = (follows ?? []).map((f) => f.wallet);
+  const wallets = (follows ?? []).map((f: { wallet: string }) => f.wallet);
   const traders = await getFollowedTraders(wallets);
 
   return (
