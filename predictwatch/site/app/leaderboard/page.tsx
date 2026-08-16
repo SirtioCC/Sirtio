@@ -56,7 +56,7 @@ export default async function LeaderboardPage() {
         <h1 className="font-[family-name:var(--font-title)] font-bold text-4xl text-parchment mb-2">
           Trader Leaderboard
         </h1>
-        <p className="text-muted mb-2">
+        <p className="text-body mb-2">
           Polymarket only. Kalshi doesn't expose public trader data.
           This leaderboard draws from Polymarket's own public
           "Monthly" leaderboard, the top 100 traders by profit over
@@ -66,7 +66,7 @@ export default async function LeaderboardPage() {
           realized PnL history to compute Sirtio Score, a different
           window than the monthly pull used to find them.
         </p>
-        <p className="text-muted/70 mb-10">
+        <p className="text-body mb-10">
           Sirtio Score is built entirely from realized PnL: average
           edge per position and total realized PnL magnitude, both
           damped by sample size.{" "}
@@ -79,7 +79,7 @@ export default async function LeaderboardPage() {
           trader's name to view their Sirtio profile, or click "View
           on Polymarket" to see their public Polymarket profile.
         </p>
-        <p className="text-muted/70 mb-10">
+        <p className="text-body mb-10">
           This list currently shows the top {scoredTraders.length} traders
           who meet the minimum requirements for a Sirtio Score. That
           number moves day to day. A trader can be excluded because
@@ -90,11 +90,11 @@ export default async function LeaderboardPage() {
         </p>
 
         {traders.length === 0 ? (
-          <p className="text-muted">
+          <p className="text-body">
             No trader data yet -- run the pipeline to populate data.
           </p>
         ) : (
-          <div>
+          <div className="bg-surface rounded-lg px-4 sm:px-6 pt-2">
             <div className="grid grid-cols-[28px_1fr_90px] sm:grid-cols-[40px_360px_1fr_1fr] gap-3 sm:gap-6 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
               <span>#</span>
               <span>Trader</span>
@@ -126,7 +126,7 @@ export default async function LeaderboardPage() {
                   </div>
                 </div>
                 <div className="text-center">
-                  <span className="font-mono text-sm text-signal-yes">
+                  <span className="font-mono text-xl text-accent">
                     {t.pm_score !== null ? t.pm_score.toFixed(1) : "--"}
                   </span>
                   {scoreTier(t.z_score) && (
@@ -135,11 +135,12 @@ export default async function LeaderboardPage() {
                     </p>
                   )}
                 </div>
-                <span className="hidden sm:block font-mono text-sm text-muted text-center">
+                <span className="hidden sm:block font-mono text-base text-parchment text-center">
                   {t.position_count}
                 </span>
               </div>
             ))}
+            <div className="pb-2" />
           </div>
         )}
       </section>

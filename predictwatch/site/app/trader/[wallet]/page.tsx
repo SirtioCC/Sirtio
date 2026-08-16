@@ -2,7 +2,7 @@ import Link from "next/link";
 import Nav from "@/components/Nav";
 import CopyableWallet from "@/components/CopyableWallet";
 import FollowButton from "@/components/FollowButton";
-import { getTraderStats, getTraderPositions, resolveWallet } from "@/lib/queries";
+import { getTraderStats, getTraderPositions, resolveWallet, type TraderPosition } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 // Was force-dynamic (fresh Supabase query on every single request) --
 // switched to a 5-minute revalidation window 2026-08-16 after this
@@ -17,6 +17,21 @@ import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 // serving cached HTML to almost all traffic instead of hitting
 // Supabase every time. See leaderboard/page.tsx for the same change.
 export const revalidate = 300;
+
+// Same tier system as the leaderboard (see leaderboard/page.tsx for the
+// full z_score-vs-score rationale) -- duplicated here rather than shared
+// since there's no existing shared utils module for it. Trader detail
+// pages never surfaced tier before; this is genuinely new information,
+// not just decoration.
+function scoreTier(zScore: number | null): string | null {
+  if (zScore === null) return null;
+  if (zScore >= 6) return "Elite";
+  if (zScore >= 3) return "Great";
+  if (zScore >= 1) return "Good";
+  if (zScore >= -1) return "Break even";
+  if (zScore >= -3) return "Below average";
+  return "Poor";
+}
 
 function formatMoney(v: number | null) {
   if (v === null) return "--";
@@ -70,6 +85,42 @@ function traderSummary(stats: {
     `skill model, ${name} ${verdict}${rankText}.`;
 }
 
+// Real specifics pulled from this trader's actual positions -- their
+// best win, worst loss, and whether one trade dominates their total
+// realized PnL for the window. Two traders with a similar score can
+// read completely differently here if one got there from one huge
+// trade and the other from a long consistent streak.
+function scoreBreakdownDetail(positions: TraderPosition[]): string | null {
+  const withPnl = positions.filter((p) => p.realized_pnl !== null);
+  if (withPnl.length === 0) return null;
+
+  const sorted = [...withPnl].sort((a, b) => b.realized_pnl! - a.realized_pnl!);
+  const bestWin = sorted[0].realized_pnl! > 0 ? sorted[0] : null;
+  const worstLoss = sorted[sorted.length - 1].realized_pnl! < 0 ? sorted[sorted.length - 1] : null;
+  const totalPnl = withPnl.reduce((sum, p) => sum + p.realized_pnl!, 0);
+  const bestWinShare = bestWin && totalPnl > 0 ? bestWin.realized_pnl! / totalPnl : null;
+
+  const parts: string[] = [];
+  if (bestWin) {
+    const pct = bestWin.percent_return_approx !== null
+      ? ` (a ${bestWin.percent_return_approx.toFixed(0)}% return)`
+      : "";
+    parts.push(`The best single trade in this window was ${formatMoney(bestWin.realized_pnl)} ` +
+      `on "${bestWin.market_title}"${pct}.`);
+  }
+  if (worstLoss) {
+    parts.push(`The worst was a ${formatMoney(worstLoss.realized_pnl)} loss on "${worstLoss.market_title}".`);
+  } else if (bestWin) {
+    parts.push(`Every resolved position in this window closed in the green -- no losses to report.`);
+  }
+  if (bestWinShare !== null && bestWinShare > 0.5) {
+    parts.push(`That single trade alone accounts for more than half of this trader's ` +
+      `total realized gains in the window, worth keeping in mind when weighing consistency.`);
+  }
+
+  return parts.length > 0 ? parts.join(" ") : null;
+}
+
 type TraderPageProps = {
   params: Promise<{ wallet: string }>;
 };
@@ -109,9 +160,9 @@ export default async function TraderPage({
           <p className="font-[family-name:var(--font-display)] text-3xl text-parchment mb-4">
             No trader found for "{decodeURIComponent(rawParam)}"
           </p>
-          <p className="text-muted mb-8">
+          <p className="text-body mb-8">
             We only track wallets that have appeared on Polymarket's
-            Monthly leaderboard (their top 100 traders by profit over
+            Monthly leaderboard (their top traders by profit over
             the last 30 days) so far. Try a wallet address, or browse
             the full leaderboard below.
           </p>
@@ -138,7 +189,7 @@ export default async function TraderPage({
           <p className="font-[family-name:var(--font-display)] text-3xl text-parchment mb-4">
             No data for this wallet yet
           </p>
-          <p className="text-muted mb-8">
+          <p className="text-body mb-8">
             This wallet isn't currently on Polymarket's Monthly
             leaderboard, so we don't have position data for it yet.
           </p>
@@ -176,7 +227,7 @@ export default async function TraderPage({
           --&gt; Back to leaderboard
         </Link>
 
-        <div className="mt-6 flex items-start justify-between flex-wrap gap-6">
+        <div className="mt-6 flex items-start justify-between gap-8 flex-wrap">
           <div>
             <div className="flex items-center gap-4 mb-2">
               <h1 className="font-[family-name:var(--font-title)] font-bold text-4xl text-parchment">
@@ -192,82 +243,121 @@ export default async function TraderPage({
               </a>
             </div>
           </div>
-          {stats.rank !== null && (
-            <div className="text-right">
-              <p className="font-mono text-xs uppercase tracking-wide text-muted">
-                Leaderboard rank
+
+          {scoreTier(stats.z_score) && (
+            <div className="bg-surface-raised border border-accent/40 rounded-lg px-6 py-3 text-center">
+              <p className="font-mono text-xs uppercase tracking-wide text-muted mb-1">
+                Tier
               </p>
-              <p className="font-[family-name:var(--font-display)] text-3xl text-accent">
-                #{stats.rank}
+              <p className="font-[family-name:var(--font-title)] font-bold text-2xl text-accent">
+                {scoreTier(stats.z_score)}
               </p>
             </div>
           )}
         </div>
 
-        <p className="mt-6 text-sm text-muted leading-relaxed max-w-3xl">
+        <p className="mt-6 text-sm text-body leading-relaxed max-w-3xl">
           {traderSummary(stats, name)}
         </p>
 
-        <div className="mt-12 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
-          <div className="border border-hairline rounded-lg p-5">
+        <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
+          <div className="bg-surface-raised border border-accent/40 rounded-lg p-5 flex items-start gap-10">
+            {stats.rank !== null && (
+              <div className="text-center">
+                <p className="font-mono text-xs uppercase tracking-wide text-muted">
+                  Rank
+                </p>
+                <p className="font-[family-name:var(--font-display)] italic text-3xl text-parchment">
+                  #{stats.rank}
+                </p>
+              </div>
+            )}
+            <div className="text-center">
+              <p className="font-mono text-xs uppercase tracking-wide text-muted">
+                Sirtio score
+              </p>
+              <p className="font-mono text-3xl text-accent">
+                {stats.pm_score !== null ? stats.pm_score.toFixed(1) : "--"}
+              </p>
+            </div>
+          </div>
+          <div className="bg-surface-raised border border-accent/40 rounded-lg p-5">
             <p className="text-xs uppercase tracking-wide text-muted mb-2">
               Avg edge (per position)
             </p>
-            <p className="font-[family-name:var(--font-display)] text-2xl text-parchment">
+            <p className="font-[family-name:var(--font-display)] text-3xl text-parchment">
               {stats.avg_edge_pct !== null ? `${stats.avg_edge_pct >= 0 ? "+" : ""}${stats.avg_edge_pct.toFixed(0)}%` : "--"}
             </p>
           </div>
-          <div className="border border-hairline rounded-lg p-5">
+          <div className="bg-surface-raised border border-accent/40 rounded-lg p-5">
             <p className="text-xs uppercase tracking-wide text-muted mb-2">Positions (90d)</p>
-            <p className="font-[family-name:var(--font-display)] text-2xl text-parchment">
+            <p className="font-[family-name:var(--font-display)] text-3xl text-parchment">
               {stats.position_count}
             </p>
           </div>
         </div>
 
-        <div className="mt-16">
-          <div className="flex items-baseline justify-between mb-6">
-            <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment">
-              Sirtio Score Breakdown
-            </h2>
-            <p className="font-mono text-3xl text-signal-yes">
-              {stats.pm_score !== null ? stats.pm_score.toFixed(1) : "--"}
-            </p>
-          </div>
+        <div className="mt-10">
+          <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mb-6">
+            Sirtio Score Breakdown
+          </h2>
           <p className="text-xs text-muted mb-6">
             See the <Link href="/methodology" className="text-accent hover:underline">full methodology</Link> for how each piece is calculated.
           </p>
 
-          {stats.position_count > 0 && stats.z_score !== null ? (
-            <div className="space-y-4">
-              <p className="text-sm text-muted leading-relaxed max-w-2xl">
-                This trader's average return across {stats.position_count}{" "}
-                resolved position{stats.position_count === 1 ? "" : "s"} was{" "}
-                {stats.avg_edge_pct !== null
-                  ? `${stats.avg_edge_pct >= 0 ? "+" : ""}${stats.avg_edge_pct.toFixed(0)}%`
-                  : "--"}
-                . Sirtio Score doesn't use that raw number
-                directly. It's first blended toward the average
-                trader's return, in proportion to how much track
-                record exists for this wallet, then measured against
-                how uncertain that blended estimate still is. A thin
-                sample or an inconsistent track record both widen that
-                uncertainty and pull the score toward 50 (breakeven).
-                A large, consistent sample lets the score move further
-                from 50 in either direction.
-              </p>
-              <div className="flex items-baseline gap-3">
-                <span className="font-mono text-xs uppercase tracking-wide text-muted">
-                  Z-score
-                </span>
-                <span className="font-mono text-sm text-parchment">
-                  {stats.z_score >= 0 ? "+" : ""}
-                  {stats.z_score.toFixed(2)}
-                </span>
+          {stats.position_count > 0 && stats.z_score !== null ? (() => {
+            const detailText = scoreBreakdownDetail(positions);
+            const edgeText = stats.avg_edge_pct !== null
+              ? `${stats.avg_edge_pct >= 0 ? "+" : ""}${stats.avg_edge_pct.toFixed(0)}%`
+              : "--";
+            const zText = `${stats.z_score! >= 0 ? "+" : ""}${stats.z_score!.toFixed(2)}`;
+            const scoreText = stats.pm_score !== null ? stats.pm_score.toFixed(1) : "--";
+            return (
+            <div className="space-y-6">
+              <div className="bg-surface-raised rounded-lg px-6 py-6">
+                <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-1">
+                  <div className="flex-1 text-center">
+                    <p className="text-xs uppercase tracking-wide text-muted mb-1">Raw avg return</p>
+                    <p className="font-mono text-2xl text-parchment">{edgeText}</p>
+                    <p className="text-xs text-muted mt-1">across {stats.position_count} position{stats.position_count === 1 ? "" : "s"}</p>
+                  </div>
+                  <div className="flex flex-col items-center justify-center px-2 max-w-[130px]">
+                    <span className="text-accent text-xl leading-none">&rarr;</span>
+                    <span className="text-[10px] text-muted text-center mt-1 leading-tight">
+                      Shrunk toward the pool average, weighted by sample size
+                    </span>
+                  </div>
+                  <div className="flex-1 text-center">
+                    <p className="text-xs uppercase tracking-wide text-muted mb-1">Z-score</p>
+                    <p className="font-mono text-2xl text-parchment">{zText}</p>
+                    <p className="text-xs text-muted mt-1">distance from average, adjusted for confidence</p>
+                  </div>
+                  <div className="flex flex-col items-center justify-center px-2 max-w-[130px]">
+                    <span className="text-accent text-xl leading-none">&rarr;</span>
+                    <span className="text-[10px] text-muted text-center mt-1 leading-tight">
+                      Converted to a 0-100 scale
+                    </span>
+                  </div>
+                  <div className="flex-1 text-center">
+                    <p className="text-xs uppercase tracking-wide text-muted mb-1">Sirtio score</p>
+                    <p className="font-mono text-2xl text-accent">{scoreText}</p>
+                  </div>
+                </div>
+                <p className="text-xs text-muted mt-5 text-center">
+                  The exact weighting is part of the model we keep private (see{" "}
+                  <Link href="/methodology" className="text-accent hover:underline">methodology</Link>),
+                  but every number above is this trader's real, calculated value at that step.
+                </p>
               </div>
+              {detailText && (
+                <p className="text-sm text-body leading-relaxed max-w-2xl">
+                  {detailText}
+                </p>
+              )}
             </div>
-          ) : (
-            <p className="text-sm text-muted">
+            );
+          })() : (
+            <p className="text-sm text-body">
               No resolved positions yet. Sirtio Score needs at least
               some position history to compute.
             </p>
@@ -305,7 +395,7 @@ export default async function TraderPage({
                 {topWins.length > 0 ? (
                   <div>{topWins.map((p) => renderRow(p, true))}</div>
                 ) : (
-                  <p className="text-sm text-muted">No winning positions in this window.</p>
+                  <p className="text-sm text-body">No winning positions in this window.</p>
                 )}
               </div>
               <div>
@@ -315,7 +405,7 @@ export default async function TraderPage({
                 {topLosses.length > 0 ? (
                   <div>{topLosses.map((p) => renderRow(p, false))}</div>
                 ) : (
-                  <p className="text-sm text-muted">No losing positions in this window.</p>
+                  <p className="text-sm text-body">No losing positions in this window.</p>
                 )}
               </div>
             </div>
@@ -327,9 +417,9 @@ export default async function TraderPage({
             All Positions (Last 90 Days)
           </h2>
           {positions.length === 0 ? (
-            <p className="text-sm text-muted">No positions resolved in the last 90 days for this wallet.</p>
+            <p className="text-sm text-body">No positions resolved in the last 90 days for this wallet.</p>
           ) : (
-            <div>
+            <div className="bg-surface rounded-lg px-4 sm:px-6 pt-2">
               <div className="grid grid-cols-[1fr_90px_80px] sm:grid-cols-[1fr_80px_90px_100px_90px] gap-3 sm:gap-4 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
                 <span>Market</span>
                 <span className="hidden sm:block text-right">Side</span>
@@ -369,6 +459,7 @@ export default async function TraderPage({
                   </div>
                 );
               })}
+              <div className="pb-2" />
             </div>
           )}
         </div>

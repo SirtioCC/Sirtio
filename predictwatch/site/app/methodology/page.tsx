@@ -18,7 +18,7 @@ export default function MethodologyPage() {
         <h1 className="font-[family-name:var(--font-title)] font-bold text-4xl md:text-5xl leading-tight text-parchment mb-8">
           Profit Isn't Proof
         </h1>
-        <p className="text-lg text-muted leading-relaxed">
+        <p className="text-lg text-body leading-relaxed">
           Every other prediction-market leaderboard sorts by total profit.
           That rewards one thing: having made money. It doesn't tell you
           whether that money came from real skill or one enormous lucky
@@ -26,32 +26,32 @@ export default function MethodologyPage() {
         </p>
 
         <div className="mt-16 grid md:grid-cols-2 gap-6">
-          <div className="border border-hairline rounded-lg p-6">
+          <div className="bg-surface-raised rounded-lg p-6">
             <p className="font-mono text-xs uppercase tracking-wide text-muted mb-3">
               Trader A
             </p>
-            <p className="font-[family-name:var(--font-display)] text-3xl text-signal-yes mb-2">
+            <p className="font-[family-name:var(--font-display)] italic text-3xl text-signal-yes mb-2">
               +$500,000
             </p>
-            <p className="text-sm text-muted leading-relaxed">
+            <p className="text-sm text-body leading-relaxed">
               One long-shot bet on a single election market. Got it
               right. Total career trades: 3.
             </p>
           </div>
-          <div className="border border-hairline rounded-lg p-6">
+          <div className="bg-surface-raised rounded-lg p-6">
             <p className="font-mono text-xs uppercase tracking-wide text-muted mb-3">
               Trader B
             </p>
-            <p className="font-[family-name:var(--font-display)] text-3xl text-signal-yes mb-2">
+            <p className="font-[family-name:var(--font-display)] italic text-3xl text-signal-yes mb-2">
               +$500,000
             </p>
-            <p className="text-sm text-muted leading-relaxed">
+            <p className="text-sm text-body leading-relaxed">
               A steady 8% edge across 1,400 trades over a year, spanning
               a dozen categories.
             </p>
           </div>
         </div>
-        <p className="text-sm text-muted mt-6 leading-relaxed">
+        <p className="text-sm text-body mt-6 leading-relaxed">
           Same profit. A raw-PnL leaderboard ranks them the same.
           Trader B is the one worth paying attention to. Sirtio Score
           exists to tell them apart.
@@ -60,23 +60,23 @@ export default function MethodologyPage() {
         <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
           Where This Data Comes From
         </h2>
-        <p className="text-sm text-muted leading-relaxed mb-4">
+        <p className="text-sm text-body leading-relaxed mb-4">
           Every trader on the leaderboard first has to appear on
-          Polymarket's own public Monthly leaderboard, their top 100
+          Polymarket's own public Monthly leaderboard, their top
           traders ranked by profit over the trailing 30 days. We don't
           scan every wallet on Polymarket. We only see traders
           Polymarket itself surfaces as recent top performers.
         </p>
-        <p className="text-sm text-muted leading-relaxed mb-4">
-          Once we have those 100 wallets, we look at each one's own
-          trading history, specifically resolved positions from the
-          last 90 days, and compute Sirtio Score from that. That's
-          independent of how they ranked on Polymarket's monthly list,
+        <p className="text-sm text-body leading-relaxed mb-4">
+          Once a wallet shows up there, we look at its own trading
+          history, specifically resolved positions from the last 90
+          days, and compute Sirtio Score from that. That's
+          independent of how it ranked on Polymarket's monthly list,
           so the two windows don't line up exactly. A wallet can be a
           strong monthly performer and a weaker 90-day one, or the
           other way around.
         </p>
-        <p className="text-sm text-muted leading-relaxed mb-4">
+        <p className="text-sm text-body leading-relaxed mb-4">
           We also filter out likely bot and market-making wallets
           before scoring. A wallet with an extreme number of resolved
           positions or trade events in the window isn't a human
@@ -86,24 +86,24 @@ export default function MethodologyPage() {
           one of these wallets reflects that cutoff, not their true
           total.
         </p>
-        <p className="text-sm text-muted leading-relaxed mb-4">
+        <p className="text-sm text-body leading-relaxed mb-4">
           A trader missing from this list isn't necessarily unskilled.
           It may just mean they didn't crack Polymarket's own
-          top-100-by-monthly-profit cutoff. This leaderboard is a
-          snapshot of the strongest recent performers among
+          top-ranked cutoff at the time we checked. This leaderboard
+          is a snapshot of the strongest recent performers among
           Polymarket's own top-ranked traders, not a full ranking of
           every trader on the platform.
         </p>
-        <p className="text-sm text-muted leading-relaxed">
-          Data refreshes once a day through our automated pipeline, so
-          rankings reflect the most recent daily snapshot, not
+        <p className="text-sm text-body leading-relaxed">
+          Data refreshes every 2 hours through our automated
+          pipeline, so rankings reflect a recent snapshot, not
           real-time trading.
         </p>
 
         <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
           Redefined Around Realized PnL Only
         </h2>
-        <p className="text-sm text-muted leading-relaxed mb-4">
+        <p className="text-sm text-body leading-relaxed mb-4">
           Earlier versions of this score used a "win rate" component
           that counted how often a trader's positions resolved in
           their favor. We removed it. The problem was never measuring
@@ -115,13 +115,13 @@ export default function MethodologyPage() {
           a well-documented problem in the prediction-market data
           community. We didn't run into it alone.
         </p>
-        <p className="text-sm text-muted leading-relaxed">
+        <p className="text-sm text-body leading-relaxed">
           Realized PnL sidesteps that problem. It's a continuous
           dollar value that's always well-defined once a position
           closes, no matter how or why it closed. Nothing in the
           current model requires calling a position a win or a loss.
         </p>
-        <p className="text-sm text-muted leading-relaxed mt-4">
+        <p className="text-sm text-body leading-relaxed mt-4">
           That also means losses get captured with the same rigor as
           wins, and shown just as visibly, on every trader's page.
           Most prediction-market leaderboards effectively only show
@@ -140,14 +140,14 @@ export default function MethodologyPage() {
         <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
           The Model
         </h2>
-        <p className="text-sm text-muted leading-relaxed mb-4">
+        <p className="text-sm text-body leading-relaxed mb-4">
           Sirtio Score is built on a statistical technique used across
           fields that face the same problem: estimating someone's true
           skill from a limited, noisy sample. A handful of trades can
           look great by chance. A large, consistent track record is
           much harder to fake.
         </p>
-        <p className="text-sm text-muted leading-relaxed mb-4">
+        <p className="text-sm text-body leading-relaxed mb-4">
           Instead of scoring a trader's raw average return directly,
           the model blends it with what's typical across the whole
           tracked pool, weighted by how much real history exists for
@@ -160,7 +160,7 @@ export default function MethodologyPage() {
           both profitable and consistent, and it doesn't reward a
           trader who just got lucky once.
         </p>
-        <p className="text-sm text-muted leading-relaxed">
+        <p className="text-sm text-body leading-relaxed">
           We're keeping the exact formula, weights, and constants
           private. What's above is the real shape of how it works, not
           a simplified version hiding something different.
@@ -169,7 +169,7 @@ export default function MethodologyPage() {
         <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
           How to Read Your Score
         </h2>
-        <p className="text-sm text-muted leading-relaxed mb-6">
+        <p className="text-sm text-body leading-relaxed mb-6">
           A trader who's statistically indistinguishable from the
           average tracked trader, given how much history exists on
           them, scores exactly{" "}
@@ -182,7 +182,7 @@ export default function MethodologyPage() {
           rechecked as more history builds up.
         </p>
 
-        <p className="text-xs text-muted leading-relaxed mb-12">
+        <p className="text-xs text-body leading-relaxed mb-12">
           The exact thresholds are still early. This model has only
           been running against real data for a short time. As more
           resolved positions build up across more traders, the tier
@@ -193,7 +193,7 @@ export default function MethodologyPage() {
         <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
           What This Doesn't Do Yet
         </h2>
-        <ul className="space-y-4 text-sm text-muted leading-relaxed">
+        <ul className="space-y-4 text-sm text-body leading-relaxed">
           <li className="flex gap-3">
             <span className="text-signal-no mt-1">-</span>
             <span>

@@ -9,6 +9,13 @@
   --surface-raised: #16233d;
   --hairline: #24314a;
   --parchment: #ede7da;
+  /* Body copy tone, added 2026-08-16 -- real prose (paragraphs people
+     actually read) was sharing --muted with labels, captions, and
+     table headers, so a heading and a footnote read as the same
+     family. --muted now stays reserved for that dimmer, secondary
+     role; --body sits one step brighter, closer to --parchment,
+     specifically for paragraph text. */
+  --body: #b7c0d4;
   --muted: #8d9bb8;
   --signal-yes: #4fbf8b;
   --signal-no: #e2694b;
@@ -21,6 +28,7 @@
   --color-surface-raised: var(--surface-raised);
   --color-hairline: var(--hairline);
   --color-parchment: var(--parchment);
+  --color-body: var(--body);
   --color-muted: var(--muted);
   --color-signal-yes: var(--signal-yes);
   --color-signal-no: var(--signal-no);

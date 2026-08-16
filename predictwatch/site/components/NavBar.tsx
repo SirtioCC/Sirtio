@@ -51,18 +51,18 @@ export default function Nav({ freshness }: { freshness?: React.ReactNode }) {
         </div>
         <div className="hidden md:flex items-center gap-8 text-sm text-muted shrink-0">
           {NAV_LINKS.map((link) => (
-            <Link key={link.href} href={link.href} className="hover:text-parchment transition-colors">
+            <Link key={link.href} href={link.href} className="hover:text-accent transition-colors">
               {link.label}
             </Link>
           ))}
           {authLinks.map((link) => (
-            <Link key={link.href} href={link.href} className="hover:text-parchment transition-colors">
+            <Link key={link.href} href={link.href} className="hover:text-accent transition-colors">
               {link.label}
             </Link>
           ))}
           {loggedIn && (
             <form action={logout}>
-              <button type="submit" className="hover:text-parchment transition-colors">
+              <button type="submit" className="hover:text-accent transition-colors">
                 Log Out
               </button>
             </form>
@@ -108,7 +108,7 @@ export default function Nav({ freshness }: { freshness?: React.ReactNode }) {
                 key={link.href}
                 href={link.href}
                 onClick={() => setOpen(false)}
-                className="hover:text-parchment transition-colors"
+                className="hover:text-accent transition-colors"
               >
                 {link.label}
               </Link>
@@ -118,14 +118,14 @@ export default function Nav({ freshness }: { freshness?: React.ReactNode }) {
                 key={link.href}
                 href={link.href}
                 onClick={() => setOpen(false)}
-                className="hover:text-parchment transition-colors"
+                className="hover:text-accent transition-colors"
               >
                 {link.label}
               </Link>
             ))}
             {loggedIn && (
               <form action={logout}>
-                <button type="submit" className="text-left hover:text-parchment transition-colors">
+                <button type="submit" className="text-left hover:text-accent transition-colors">
                   Log Out
                 </button>
               </form>
