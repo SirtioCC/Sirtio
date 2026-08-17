@@ -8,9 +8,36 @@ export const metadata = {
 };
 
 export default function MethodologyPage() {
+  // Article schema: this page is explanatory long-form content, not a
+  // data listing (that's what the trader/leaderboard pages' Person/
+  // ProfilePage schema is for). Article is the correct schema.org type
+  // for "how this works" content and is what search engines look for
+  // to potentially surface this as a rich result / knowledge snippet.
+  const methodologyJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: "Profit Isn't Proof: How Sirtio Score Works",
+    description:
+      "How Sirtio Score works: why realized PnL beats win-rate leaderboards, how bot and market-maker wallets get filtered out, and how trader skill is separated from luck.",
+    author: {
+      "@type": "Organization",
+      name: "Sirtio",
+      url: "https://www.sirtio.com",
+    },
+    publisher: {
+      "@type": "Organization",
+      name: "Sirtio",
+    },
+    mainEntityOfPage: "https://www.sirtio.com/methodology",
+  };
+
   return (
     <div className="min-h-screen">
       <Nav />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(methodologyJsonLd) }}
+      />
       <section className="max-w-3xl mx-auto px-6 py-20">
         <p className="font-mono text-xs uppercase tracking-widest text-accent mb-6">
           Methodology

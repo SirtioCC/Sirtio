@@ -202,6 +202,14 @@ export default async function TraderPage({
   }
 
   const name = getDisplayName(stats.username, stats.wallet);
+  // Structured data for rich snippets. AggregateRating is the
+  // schema.org field Google actually surfaces as a visible number in
+  // search results, so the Sirtio Score is mapped there (worstRating 0,
+  // bestRating 100, matching the site's own display scale) rather than
+  // buried in a generic property. additionalProperty carries the rest
+  // (rank, avg edge, position count, realized PnL, tier) as structured
+  // PropertyValue entries -- real values pulled from this page's own
+  // stats, so this can't drift out of sync with what's rendered below.
   const traderJsonLd = {
     "@context": "https://schema.org",
     "@type": "ProfilePage",
@@ -212,6 +220,34 @@ export default async function TraderPage({
       "@type": "Person",
       name,
       identifier: stats.wallet,
+      ...(stats.pm_score !== null && {
+        aggregateRating: {
+          "@type": "AggregateRating",
+          ratingValue: stats.pm_score.toFixed(1),
+          bestRating: "100",
+          worstRating: "0",
+          ratingCount: stats.position_count,
+          itemReviewed: {
+            "@type": "Thing",
+            name: `${name}'s Polymarket trading performance`,
+          },
+        },
+      }),
+      additionalProperty: [
+        ...(stats.rank !== null
+          ? [{ "@type": "PropertyValue", name: "Sirtio Leaderboard Rank", value: stats.rank }]
+          : []),
+        ...(stats.avg_edge_pct !== null
+          ? [{ "@type": "PropertyValue", name: "Average Edge (per position)", value: `${stats.avg_edge_pct.toFixed(1)}%` }]
+          : []),
+        { "@type": "PropertyValue", name: "Resolved Positions (90d)", value: stats.position_count },
+        ...(stats.realized_pnl_90d !== null
+          ? [{ "@type": "PropertyValue", name: "Realized PnL (90d, USD)", value: stats.realized_pnl_90d.toFixed(0) }]
+          : []),
+        ...(scoreTier(stats.z_score)
+          ? [{ "@type": "PropertyValue", name: "Sirtio Tier", value: scoreTier(stats.z_score) }]
+          : []),
+      ],
     },
   };
 
