@@ -73,6 +73,12 @@ export default async function LeaderboardPage() {
   const scoredTraders = traders.filter(
     (t) => t.pm_score !== null || t.position_count > 0
   );
+  // On the first day this feature is live, no trader has a prior
+  // snapshot to compare against, so every row would show "NEW" --
+  // correct, but reads like a bug to a visitor. Detect that case and
+  // show a single coming-soon note in the column instead, until real
+  // day-over-day data exists.
+  const hasRankHistory = scoredTraders.some((t) => t.prev_rank !== null);
 
   return (
     <div className="min-h-screen">
@@ -162,7 +168,11 @@ export default async function LeaderboardPage() {
                   )}
                 </div>
                 <div className="hidden sm:flex justify-center">
-                  <RankMove currentRank={i + 1} prevRank={t.prev_rank} />
+                  {hasRankHistory ? (
+                    <RankMove currentRank={i + 1} prevRank={t.prev_rank} />
+                  ) : (
+                    <span className="text-xs text-muted">Coming Aug 18</span>
+                  )}
                 </div>
                 <span className="hidden sm:block font-mono text-base text-parchment text-center">
                   {t.position_count}
