@@ -166,15 +166,19 @@ CREATE TABLE IF NOT EXISTS wallet_open_ledger (
 -- 90-day ledger, not live SQL per page load. The site reads this table
 -- directly instead of deriving the score itself.
 CREATE TABLE IF NOT EXISTS trader_sirtio_scores (
-    wallet TEXT PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
+    wallet TEXT NOT NULL,
     position_count INTEGER NOT NULL,
     avg_edge_pct DOUBLE PRECISION,
     shrunk_edge_pct DOUBLE PRECISION,
     z_score DOUBLE PRECISION,
     realized_pnl_90d DOUBLE PRECISION,
     sirtio_score DOUBLE PRECISION,
-    computed_at TIMESTAMPTZ NOT NULL
+    computed_at TIMESTAMPTZ NOT NULL,
+    leaderboard_snapshot_at TIMESTAMPTZ
 );
+CREATE INDEX IF NOT EXISTS idx_sirtio_scores_wallet_computed
+    ON trader_sirtio_scores(wallet, computed_at DESC);
 
 -- One row per pipeline run -- lets us watch mu/sigma2/tau2/k drift over
 -- time as the wallet pool and their real track records change, and is
@@ -358,6 +362,13 @@ def save_to_supabase(rows):
         conn.close()
 
 
+def fetch_latest_leaderboard_timestamp(conn):
+    with conn.cursor() as cur:
+        cur.execute("SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots")
+        row = cur.fetchone()
+        return row[0].isoformat() if row and row[0] else None
+
+
 def save_leaderboard_to_supabase(rows):
     # source defaulted here rather than assumed present on each row --
     # fetch_polymarket_leaderboard.py's exact row shape wasn't in hand
@@ -523,11 +534,11 @@ def save_wallet_open_ledger(new_open_positions: dict, processed_wallets: list):
         conn.close()
 
 
-def save_sirtio_scores(results: list, pop_stats: dict):
+def save_sirtio_scores(results: list, pop_stats: dict, leaderboard_snapshot_at: str):
     if not results:
         return
     now_iso = datetime.now(timezone.utc).isoformat()
-    rows = [{**r, "computed_at": now_iso} for r in results]
+    rows = [{**r, "computed_at": now_iso, "leaderboard_snapshot_at": leaderboard_snapshot_at} for r in results]
     conn = get_connection()
     try:
         with conn.cursor() as cur:
@@ -537,18 +548,10 @@ def save_sirtio_scores(results: list, pop_stats: dict):
                 """
                 INSERT INTO trader_sirtio_scores
                 (wallet, position_count, avg_edge_pct, shrunk_edge_pct,
-                 z_score, realized_pnl_90d, sirtio_score, computed_at)
+                 z_score, realized_pnl_90d, sirtio_score, computed_at, leaderboard_snapshot_at)
                 VALUES (%(wallet)s, %(position_count)s, %(avg_edge_pct)s,
                         %(shrunk_edge_pct)s, %(z_score)s, %(realized_pnl_90d)s,
-                        %(sirtio_score)s, %(computed_at)s)
-                ON CONFLICT (wallet) DO UPDATE SET
-                    position_count = EXCLUDED.position_count,
-                    avg_edge_pct = EXCLUDED.avg_edge_pct,
-                    shrunk_edge_pct = EXCLUDED.shrunk_edge_pct,
-                    z_score = EXCLUDED.z_score,
-                    realized_pnl_90d = EXCLUDED.realized_pnl_90d,
-                    sirtio_score = EXCLUDED.sirtio_score,
-                    computed_at = EXCLUDED.computed_at
+                        %(sirtio_score)s, %(computed_at)s, %(leaderboard_snapshot_at)s)
                 """,
                 rows,
             )
@@ -722,13 +725,14 @@ def run():
                 with conn.cursor() as cur:
                     cur.execute(SCHEMA)
                 results, pop_stats = sirtio_score.run(conn)
+                latest_leaderboard_fetch = fetch_latest_leaderboard_timestamp(conn)
             finally:
                 conn.close()
             print(f"  mu={pop_stats['mu']:.2f}  sigma2={pop_stats['sigma2']:.1f}  "
                   f"tau2={pop_stats['tau2']:.2f}  k={pop_stats['k']:.4f}  "
                   f"across {pop_stats['n_wallets']} wallets")
             if results:
-                save_sirtio_scores(results, pop_stats)
+                save_sirtio_scores(results, pop_stats, latest_leaderboard_fetch)
                 print(f"Saved {len(results)} Sirtio Scores to Supabase")
         except Exception as e:
             print(f"Sirtio Score computation failed: {e}")
