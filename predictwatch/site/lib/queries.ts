@@ -116,12 +116,17 @@ export async function getFollowedTraders(wallets: string[]): Promise<Leaderboard
       SELECT * FROM trader_leaderboard_snapshots
       WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
     ),
+    latest_scores AS (
+      SELECT DISTINCT ON (wallet) *
+      FROM trader_sirtio_scores
+      ORDER BY wallet, computed_at DESC
+    ),
     ranked AS (
       SELECT
         l.wallet,
         ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC) AS rank
       FROM latest_leaderboard l
-      LEFT JOIN trader_sirtio_scores s ON s.wallet = l.wallet
+      LEFT JOIN latest_scores s ON s.wallet = l.wallet
     ),
     latest_username AS (
       SELECT DISTINCT ON (wallet) wallet, username
@@ -140,7 +145,7 @@ export async function getFollowedTraders(wallets: string[]): Promise<Leaderboard
       s.z_score,
       s.sirtio_score AS pm_score
     FROM latest_username u
-    LEFT JOIN trader_sirtio_scores s ON s.wallet = u.wallet
+    LEFT JOIN latest_scores s ON s.wallet = u.wallet
     LEFT JOIN ranked r ON r.wallet = u.wallet
     ORDER BY s.sirtio_score DESC NULLS LAST
   `;
@@ -157,6 +162,11 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
     WITH latest_leaderboard AS (
       SELECT * FROM trader_leaderboard_snapshots
       WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
+    ),
+    latest_scores AS (
+      SELECT DISTINCT ON (wallet) *
+      FROM trader_sirtio_scores
+      ORDER BY wallet, computed_at DESC
     )
     SELECT
       l.rank,
@@ -169,7 +179,7 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
       s.z_score,
       s.sirtio_score AS pm_score
     FROM latest_leaderboard l
-    LEFT JOIN trader_sirtio_scores s ON s.wallet = l.wallet
+    LEFT JOIN latest_scores s ON s.wallet = l.wallet
     ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC
     LIMIT ${limit}
   `;
@@ -230,6 +240,11 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
       SELECT * FROM trader_leaderboard_snapshots
       WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
     ),
+    latest_scores AS (
+      SELECT DISTINCT ON (wallet) *
+      FROM trader_sirtio_scores
+      ORDER BY wallet, computed_at DESC
+    ),
     scored AS (
       SELECT
         l.wallet,
@@ -242,7 +257,7 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
         s.z_score,
         s.sirtio_score AS pm_score
       FROM latest_leaderboard l
-      LEFT JOIN trader_sirtio_scores s ON s.wallet = l.wallet
+      LEFT JOIN latest_scores s ON s.wallet = l.wallet
     ),
     ranked AS (
       SELECT
