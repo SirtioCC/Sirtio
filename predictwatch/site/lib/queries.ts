@@ -27,6 +27,7 @@ export type LeaderboardTrader = {
   avg_edge_pct: number | null;
   z_score: number | null;
   pm_score: number | null;
+  prev_rank: number | null;
 };
 
 export type HeroStats = {
@@ -154,19 +155,53 @@ export async function getFollowedTraders(wallets: string[]): Promise<Leaderboard
     avg_edge_pct: r.avg_edge_pct !== null ? Number(r.avg_edge_pct) : null,
     z_score: r.z_score !== null ? Number(r.z_score) : null,
     pm_score: r.pm_score !== null ? Number(r.pm_score) : null,
+    prev_rank: null,
   }));
 }
 
 export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
   const rows = await sql<LeaderboardTrader[]>`
-    WITH latest_leaderboard AS (
+    WITH latest_leaderboard_time AS (
+      SELECT MAX(fetched_at) AS t FROM trader_leaderboard_snapshots
+    ),
+    latest_leaderboard AS (
       SELECT * FROM trader_leaderboard_snapshots
-      WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
+      WHERE fetched_at >= (SELECT t FROM latest_leaderboard_time) - INTERVAL '1 minute'
     ),
     latest_scores AS (
       SELECT DISTINCT ON (wallet) *
       FROM trader_sirtio_scores
       ORDER BY wallet, computed_at DESC
+    ),
+    -- "Yesterday's" snapshot for the leaderboard-mover arrows. A 6-hour
+    -- gap from the latest fetch is used to skip past same-day/manual
+    -- reruns and land on the prior day's daily scheduled run. On the
+    -- very first day this feature runs (or if there's genuinely no
+    -- older snapshot yet), this comes back empty and every trader
+    -- correctly falls back to "NEW" below, rather than a fake number.
+    previous_leaderboard_time AS (
+      SELECT MAX(fetched_at) AS t FROM trader_leaderboard_snapshots
+      WHERE fetched_at < (SELECT t FROM latest_leaderboard_time) - INTERVAL '6 hours'
+    ),
+    previous_leaderboard AS (
+      SELECT * FROM trader_leaderboard_snapshots
+      WHERE fetched_at >= (SELECT t FROM previous_leaderboard_time) - INTERVAL '1 minute'
+        AND fetched_at <= (SELECT t FROM previous_leaderboard_time)
+    ),
+    previous_scores AS (
+      SELECT DISTINCT ON (wallet) *
+      FROM trader_sirtio_scores
+      WHERE computed_at <= (SELECT t FROM previous_leaderboard_time) + INTERVAL '2 hours'
+      ORDER BY wallet, computed_at DESC
+    ),
+    -- Same ordering as the final SELECT below (score DESC, NULLS LAST),
+    -- so a previous rank means the same thing as today's rank.
+    previous_ranked AS (
+      SELECT
+        l.wallet,
+        ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC) AS prev_rank
+      FROM previous_leaderboard l
+      LEFT JOIN previous_scores s ON s.wallet = l.wallet
     )
     SELECT
       l.rank,
@@ -177,9 +212,11 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
       COALESCE(s.position_count, 0) AS position_count,
       s.avg_edge_pct,
       s.z_score,
-      s.sirtio_score AS pm_score
+      s.sirtio_score AS pm_score,
+      p.prev_rank
     FROM latest_leaderboard l
     LEFT JOIN latest_scores s ON s.wallet = l.wallet
+    LEFT JOIN previous_ranked p ON p.wallet = l.wallet
     ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC
     LIMIT ${limit}
   `;
@@ -188,6 +225,7 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
     avg_edge_pct: r.avg_edge_pct !== null ? Number(r.avg_edge_pct) : null,
     z_score: r.z_score !== null ? Number(r.z_score) : null,
     pm_score: r.pm_score !== null ? Number(r.pm_score) : null,
+    prev_rank: r.prev_rank !== null ? Number(r.prev_rank) : null,
   }));
 }
 

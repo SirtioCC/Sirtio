@@ -43,6 +43,31 @@ function scoreTier(zScore: number | null): string | null {
   return "Poor";
 }
 
+// Rank-mover badge: compares a trader's position in today's list
+// (their index in scoredTraders, 1-based) against prev_rank (their
+// position in the last daily snapshot, from getLeaderboard). A 2-spot
+// minimum avoids showing noisy arrows for 1-spot churn among
+// tightly-clustered Elite-tier scores that isn't a meaningful move.
+// prev_rank === null means no prior snapshot exists for this wallet
+// yet (brand new to the leaderboard, or this is the first day the
+// feature has snapshot history to compare against) -- shown as NEW,
+// not a fake number.
+function RankMove({ currentRank, prevRank }: { currentRank: number; prevRank: number | null }) {
+  if (prevRank === null) {
+    return <span className="text-xs font-mono text-accent">NEW</span>;
+  }
+  const change = prevRank - currentRank; // positive = moved up (better rank)
+  if (Math.abs(change) < 2) {
+    return <span className="text-sm font-mono text-muted">--</span>;
+  }
+  const isUp = change > 0;
+  return (
+    <span className={`text-sm font-mono ${isUp ? "text-signal-yes" : "text-signal-no"}`}>
+      {isUp ? "▲" : "▼"}{Math.abs(change)}
+    </span>
+  );
+}
+
 export default async function LeaderboardPage() {
   const traders = await getLeaderboard(100);
   const scoredTraders = traders.filter(
@@ -95,15 +120,16 @@ export default async function LeaderboardPage() {
           </p>
         ) : (
           <div className="bg-surface rounded-lg px-4 sm:px-6 pt-2">
-            <div className="grid grid-cols-[28px_1fr_90px] sm:grid-cols-[40px_360px_1fr_1fr] gap-3 sm:gap-6 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
+            <div className="grid grid-cols-[28px_1fr_90px] sm:grid-cols-[40px_340px_1fr_90px_1fr] gap-3 sm:gap-6 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
               <span>#</span>
               <span>Trader</span>
               <span className="text-center">Sirtio Score</span>
+              <span className="hidden sm:block text-center">Change</span>
               <span className="hidden sm:block text-center">Resolved Bets (Last 90D)</span>
             </div>
             {scoredTraders.map((t, i) => (
               <div key={t.wallet}
-                className="grid grid-cols-[28px_1fr_90px] sm:grid-cols-[40px_360px_1fr_1fr] items-center gap-3 sm:gap-6 py-4 border-b border-hairline"
+                className="grid grid-cols-[28px_1fr_90px] sm:grid-cols-[40px_340px_1fr_90px_1fr] items-center gap-3 sm:gap-6 py-4 border-b border-hairline"
               >
                 <span className="font-mono text-muted text-sm">
                   {String(i + 1).padStart(2, "0")}
@@ -134,6 +160,9 @@ export default async function LeaderboardPage() {
                       {scoreTier(t.z_score)}
                     </p>
                   )}
+                </div>
+                <div className="hidden sm:flex justify-center">
+                  <RankMove currentRank={i + 1} prevRank={t.prev_rank} />
                 </div>
                 <span className="hidden sm:block font-mono text-base text-parchment text-center">
                   {t.position_count}
