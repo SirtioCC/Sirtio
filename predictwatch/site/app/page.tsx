@@ -21,9 +21,7 @@ export default async function Home() {
               Polymarket
             </p>
             <h1 className="font-[family-name:var(--font-title)] font-bold text-5xl md:text-6xl leading-[1.05] max-w-3xl text-parchment">
-              Find the traders who{" "}
-              <span className="italic text-accent">actually know</span> what
-              they&apos;re doing.
+              Find the traders who actually know what they&apos;re doing.
             </h1>
             <p className="mt-6 text-lg text-muted max-w-xl">
               Every prediction-market leaderboard ranks by raw dollars, so
