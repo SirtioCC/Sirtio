@@ -161,7 +161,7 @@ export async function getFollowedTraders(wallets: string[]): Promise<Leaderboard
 }
 
 export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
-  const rows = await sql<LeaderboardTrader[]>`
+  const rows = await sql<Omit<LeaderboardTrader, "prev_rank">[]>`
     WITH latest_leaderboard_time AS (
       SELECT MAX(fetched_at) AS t FROM trader_leaderboard_snapshots
     ),
@@ -173,25 +173,6 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
       SELECT DISTINCT ON (wallet) *
       FROM trader_sirtio_scores
       ORDER BY wallet, computed_at DESC
-    ),
-    -- Yesterday's rank for the leaderboard-mover arrows, read from
-    -- trader_daily_ranks -- a dedicated once-a-day-per-wallet snapshot
-    -- table written by the pipeline right after Sirtio Scores are saved
-    -- each run. trader_leaderboard_snapshots can't serve this: it's
-    -- upserted in place (one row per wallet, overwritten every run) to
-    -- keep storage bounded, so no prior day's rank survives there for a
-    -- wallet still active today. On the first day this table has real
-    -- data (or for a wallet that's new), this comes back empty and the
-    -- trader correctly falls back to "NEW" below, rather than a fake
-    -- number.
-    previous_rank_date AS (
-      SELECT MAX(snapshot_date) AS d FROM trader_daily_ranks
-      WHERE snapshot_date < CURRENT_DATE
-    ),
-    previous_ranks AS (
-      SELECT wallet, rank AS prev_rank
-      FROM trader_daily_ranks
-      WHERE snapshot_date = (SELECT d FROM previous_rank_date)
     )
     SELECT
       l.rank,
@@ -202,20 +183,53 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
       COALESCE(s.position_count, 0) AS position_count,
       s.avg_edge_pct,
       s.z_score,
-      s.sirtio_score AS pm_score,
-      p.prev_rank
+      s.sirtio_score AS pm_score
     FROM latest_leaderboard l
     LEFT JOIN latest_scores s ON s.wallet = l.wallet
-    LEFT JOIN previous_ranks p ON p.wallet = l.wallet
     ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC
     LIMIT ${limit}
   `;
+
+  // Yesterday's rank for the leaderboard-mover arrows, read from
+  // trader_daily_ranks -- a dedicated once-a-day-per-wallet snapshot
+  // table written by the pipeline right after Sirtio Scores are saved
+  // each run. trader_leaderboard_snapshots can't serve this: it's
+  // upserted in place (one row per wallet, overwritten every run) to
+  // keep storage bounded, so no prior day's rank survives there for a
+  // wallet still active today.
+  //
+  // Deliberately a SEPARATE query, wrapped in its own try/catch, rather
+  // than one more CTE joined into the query above: trader_daily_ranks is
+  // only created by the pipeline's schema step, so the table may not
+  // exist yet in a given database the first time this code runs against
+  // it (confirmed live via a Vercel build failure: 42P01 undefined_table,
+  // which -- since /leaderboard is statically prerendered -- crashed the
+  // ENTIRE page build, not just this feature). Isolating it here means a
+  // missing table degrades to "NEW" for every trader (same as a genuine
+  // first day with no history) instead of taking the whole leaderboard
+  // down.
+  let prevRanks = new Map<string, number>();
+  try {
+    const prevRows = await sql<{ wallet: string; prev_rank: number }[]>`
+      WITH previous_rank_date AS (
+        SELECT MAX(snapshot_date) AS d FROM trader_daily_ranks
+        WHERE snapshot_date < CURRENT_DATE
+      )
+      SELECT wallet, rank AS prev_rank
+      FROM trader_daily_ranks
+      WHERE snapshot_date = (SELECT d FROM previous_rank_date)
+    `;
+    prevRanks = new Map(prevRows.map((r) => [r.wallet, Number(r.prev_rank)]));
+  } catch (e) {
+    console.error("Failed to load trader_daily_ranks, degrading to NEW for all traders:", e);
+  }
+
   return rows.map((r) => ({
     ...r,
     avg_edge_pct: r.avg_edge_pct !== null ? Number(r.avg_edge_pct) : null,
     z_score: r.z_score !== null ? Number(r.z_score) : null,
     pm_score: r.pm_score !== null ? Number(r.pm_score) : null,
-    prev_rank: r.prev_rank !== null ? Number(r.prev_rank) : null,
+    prev_rank: prevRanks.get(r.wallet) ?? null,
   }));
 }
 
