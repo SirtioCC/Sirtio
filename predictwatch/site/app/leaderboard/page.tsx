@@ -45,19 +45,18 @@ function scoreTier(zScore: number | null): string | null {
 
 // Rank-mover badge: compares a trader's position in today's list
 // (their index in scoredTraders, 1-based) against prev_rank (their
-// position in the last daily snapshot, from getLeaderboard). A 2-spot
-// minimum avoids showing noisy arrows for 1-spot churn among
-// tightly-clustered Elite-tier scores that isn't a meaningful move.
-// prev_rank === null means no prior snapshot exists for this wallet
-// yet (brand new to the leaderboard, or this is the first day the
-// feature has snapshot history to compare against) -- shown as NEW,
-// not a fake number.
+// position in yesterday's snapshot, from getLeaderboard). prev_rank
+// === null means no prior snapshot exists for this wallet yet (brand
+// new to the leaderboard, or this is the first day the feature has
+// snapshot history to compare against) -- shown as NEW, not a fake
+// number. A zero-spot change (rare, but possible) is shown as a plain
+// dash rather than an arrow with no distance behind it.
 function RankMove({ currentRank, prevRank }: { currentRank: number; prevRank: number | null }) {
   if (prevRank === null) {
     return <span className="text-xs font-mono text-accent">NEW</span>;
   }
   const change = prevRank - currentRank; // positive = moved up (better rank)
-  if (Math.abs(change) < 2) {
+  if (change === 0) {
     return <span className="text-sm font-mono text-muted">--</span>;
   }
   const isUp = change > 0;
@@ -73,12 +72,6 @@ export default async function LeaderboardPage() {
   const scoredTraders = traders.filter(
     (t) => t.pm_score !== null || t.position_count > 0
   );
-  // On the first day this feature is live, no trader has a prior
-  // snapshot to compare against, so every row would show "NEW" --
-  // correct, but reads like a bug to a visitor. Detect that case and
-  // show a single coming-soon note in the column instead, until real
-  // day-over-day data exists.
-  const hasRankHistory = scoredTraders.some((t) => t.prev_rank !== null);
 
   return (
     <div className="min-h-screen">
@@ -168,11 +161,7 @@ export default async function LeaderboardPage() {
                   )}
                 </div>
                 <div className="hidden sm:flex justify-center">
-                  {hasRankHistory ? (
-                    <RankMove currentRank={i + 1} prevRank={t.prev_rank} />
-                  ) : (
-                    <span className="text-xs text-muted">Coming Aug 18</span>
-                  )}
+                  <RankMove currentRank={i + 1} prevRank={t.prev_rank} />
                 </div>
                 <span className="hidden sm:block font-mono text-base text-parchment text-center">
                   {t.position_count}

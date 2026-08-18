@@ -4,18 +4,6 @@ import { getLeaderboard, getHeroStats } from "@/lib/queries";
 import { getDisplayName } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
-// Exception: the hero "Volume tracked" total is large enough (billions)
-// that the full number collides with the adjacent stat in the hero row
-// layout -- abbreviated specifically for that one figure, everywhere
-// else on the site shows full numbers.
-function formatVolumeAbbreviated(v: number | null) {
-  if (!v) return "$0";
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`;
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`;
-  return `$${v.toFixed(0)}`;
-}
-
 export default async function Home() {
   const [leaderboard, stats] = await Promise.all([
     getLeaderboard(10),
@@ -58,18 +46,12 @@ export default async function Home() {
             </div>
 
             {stats && (
-              <div className="mt-16 grid grid-cols-3 gap-8 max-w-xl border-t border-hairline pt-8">
+              <div className="mt-16 grid grid-cols-2 gap-8 max-w-xl border-t border-hairline pt-8">
                 <div>
                   <p className="font-[family-name:var(--font-display)] text-3xl text-parchment">
-                    {stats.total_markets.toLocaleString()}
+                    {stats.total_positions.toLocaleString()}
                   </p>
-                  <p className="text-sm text-muted mt-1">Markets tracked</p>
-                </div>
-                <div>
-                  <p className="font-[family-name:var(--font-display)] text-3xl text-parchment">
-                    {formatVolumeAbbreviated(stats.total_volume)}
-                  </p>
-                  <p className="text-sm text-muted mt-1">Volume tracked</p>
+                  <p className="text-sm text-muted mt-1">Positions analyzed</p>
                 </div>
                 <div>
                   <p className="font-[family-name:var(--font-display)] text-3xl text-parchment">
@@ -82,7 +64,7 @@ export default async function Home() {
           </div>
 
           {leaderboard.length > 0 && (
-            <div className="border border-hairline rounded-lg p-5">
+            <div className="border border-accent/40 rounded-lg p-5">
               <div className="flex items-baseline justify-between mb-4">
                 <p className="font-mono text-xs uppercase tracking-widest text-muted">
                   Top Traders

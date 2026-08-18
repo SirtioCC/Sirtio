@@ -180,6 +180,28 @@ CREATE TABLE IF NOT EXISTS trader_sirtio_scores (
 CREATE INDEX IF NOT EXISTS idx_sirtio_scores_wallet_computed
     ON trader_sirtio_scores(wallet, computed_at DESC);
 
+-- One row per (wallet, day) -- captures each wallet's leaderboard rank
+-- and Sirtio Score once per pipeline run, purely so the site can show
+-- how a trader's rank moved since the previous day. trader_leaderboard_snapshots
+-- can't answer that on its own: it's upserted in place (one row per
+-- wallet, overwritten every run) to keep storage bounded, so no prior
+-- day's rank survives there for a wallet still active today. Bounded
+-- growth: roughly one row per tracked wallet per day, pruned after 30
+-- days (see prune_old_rank_snapshots) since only yesterday's row is
+-- ever actually read.
+CREATE TABLE IF NOT EXISTS trader_daily_ranks (
+    id BIGSERIAL PRIMARY KEY,
+    wallet TEXT NOT NULL,
+    snapshot_date DATE NOT NULL,
+    rank INTEGER NOT NULL,
+    sirtio_score DOUBLE PRECISION,
+    computed_at TIMESTAMPTZ NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_ranks_wallet_date
+    ON trader_daily_ranks(wallet, snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_daily_ranks_date
+    ON trader_daily_ranks(snapshot_date);
+
 -- One row per pipeline run -- lets us watch mu/sigma2/tau2/k drift over
 -- time as the wallet pool and their real track records change, and is
 -- the actual source for picking real tier cutoffs (Elite/Great/etc.)
@@ -414,6 +436,80 @@ def prune_old_sirtio_scores(conn, retention_days=90):
                 WHERE b.wallet = a.wallet AND b.computed_at > a.computed_at
               )
             """,
+            (retention_days,),
+        )
+        deleted = cur.rowcount
+    conn.commit()
+    return deleted
+
+
+def save_daily_rank_snapshot(conn):
+    """
+    Writes today's rank + Sirtio Score for every wallet on the current
+    leaderboard cohort into trader_daily_ranks, one row per
+    (wallet, snapshot_date). This is what site/lib/queries.ts's
+    getLeaderboard() reads as prev_rank to drive the leaderboard's
+    up/down mover arrows.
+
+    Ranking here must match getLeaderboard()'s own tie-break exactly
+    (ORDER BY sirtio_score DESC NULLS LAST, then Polymarket rank ASC)
+    so prev_rank means the same thing as the rank a visitor actually
+    saw that day.
+
+    ON CONFLICT (wallet, snapshot_date) DO UPDATE so re-running the
+    pipeline more than once in a day (manual workflow_dispatch,
+    retries) overwrites today's row instead of erroring or duplicating.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH latest_leaderboard_time AS (
+                SELECT MAX(fetched_at) AS t FROM trader_leaderboard_snapshots
+            ),
+            latest_leaderboard AS (
+                SELECT * FROM trader_leaderboard_snapshots
+                WHERE fetched_at >= (SELECT t FROM latest_leaderboard_time) - INTERVAL '1 minute'
+            ),
+            latest_scores AS (
+                SELECT DISTINCT ON (wallet) *
+                FROM trader_sirtio_scores
+                ORDER BY wallet, computed_at DESC
+            ),
+            ranked AS (
+                SELECT
+                    l.wallet,
+                    ROW_NUMBER() OVER (
+                        ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC
+                    ) AS rank,
+                    s.sirtio_score
+                FROM latest_leaderboard l
+                LEFT JOIN latest_scores s ON s.wallet = l.wallet
+            )
+            INSERT INTO trader_daily_ranks
+                (wallet, snapshot_date, rank, sirtio_score, computed_at)
+            SELECT wallet, CURRENT_DATE, rank, sirtio_score, NOW()
+            FROM ranked
+            ON CONFLICT (wallet, snapshot_date) DO UPDATE SET
+                rank = EXCLUDED.rank,
+                sirtio_score = EXCLUDED.sirtio_score,
+                computed_at = EXCLUDED.computed_at
+            """
+        )
+        saved = cur.rowcount
+    conn.commit()
+    return saved
+
+
+def prune_old_rank_snapshots(conn, retention_days=30):
+    """
+    trader_daily_ranks only ever needs to answer "what was this wallet's
+    rank yesterday" -- unlike trader_sirtio_scores, no "always keep the
+    latest row" exception is needed here, so this is a plain age-based
+    delete.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM trader_daily_ranks WHERE snapshot_date < CURRENT_DATE - (%s * INTERVAL '1 day')",
             (retention_days,),
         )
         deleted = cur.rowcount
@@ -813,6 +909,22 @@ def run():
             print(f"Sirtio Score computation failed: {e}")
             stage_failures.append("sirtio_score")
 
+        # Daily rank snapshot for the leaderboard's up/down mover arrows.
+        # Not a fetch stage -- doesn't affect stage_failures, same
+        # reasoning as the retention cleanup blocks below (a failure here
+        # shouldn't mark an otherwise-good refresh as failed).
+        try:
+            conn = get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(SCHEMA)
+                saved = save_daily_rank_snapshot(conn)
+            finally:
+                conn.close()
+            print(f"Saved {saved} trader_daily_ranks row(s) for today")
+        except Exception as e:
+            print(f"Daily rank snapshot save failed: {e}")
+
         # Retention cleanup, not a fetch stage -- doesn't affect
         # stage_failures/success status, since a failure here shouldn't
         # mark an otherwise-good refresh as failed.
@@ -826,6 +938,16 @@ def run():
                   f"90 days (each wallet's latest row is always kept)")
         except Exception as e:
             print(f"trader_sirtio_scores retention cleanup failed: {e}")
+
+        try:
+            conn = get_connection()
+            try:
+                deleted = prune_old_rank_snapshots(conn)
+            finally:
+                conn.close()
+            print(f"Pruned {deleted} trader_daily_ranks row(s) older than 30 days")
+        except Exception as e:
+            print(f"trader_daily_ranks retention cleanup failed: {e}")
 
         if stage_failures:
             print(f"\nPipeline run completed with failures in: {stage_failures} "

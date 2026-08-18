@@ -31,10 +31,8 @@ export type LeaderboardTrader = {
 };
 
 export type HeroStats = {
-  total_markets: number;
-  total_volume: number;
+  total_positions: number;
   total_traders: number;
-  last_updated: string | null;
 };
 
 export async function getTopMarkets(limit = 20): Promise<Market[]> {
@@ -176,35 +174,24 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
       FROM trader_sirtio_scores
       ORDER BY wallet, computed_at DESC
     ),
-    -- "Yesterday's" snapshot for the leaderboard-mover arrows. A 6-hour
-    -- gap from the latest fetch is used to skip past same-day/manual
-    -- reruns and land on the prior day's daily scheduled run. On the
-    -- very first day this feature runs (or if there's genuinely no
-    -- older snapshot yet), this comes back empty and every trader
-    -- correctly falls back to "NEW" below, rather than a fake number.
-    previous_leaderboard_time AS (
-      SELECT MAX(fetched_at) AS t FROM trader_leaderboard_snapshots
-      WHERE fetched_at < (SELECT t FROM latest_leaderboard_time) - INTERVAL '6 hours'
+    -- Yesterday's rank for the leaderboard-mover arrows, read from
+    -- trader_daily_ranks -- a dedicated once-a-day-per-wallet snapshot
+    -- table written by the pipeline right after Sirtio Scores are saved
+    -- each run. trader_leaderboard_snapshots can't serve this: it's
+    -- upserted in place (one row per wallet, overwritten every run) to
+    -- keep storage bounded, so no prior day's rank survives there for a
+    -- wallet still active today. On the first day this table has real
+    -- data (or for a wallet that's new), this comes back empty and the
+    -- trader correctly falls back to "NEW" below, rather than a fake
+    -- number.
+    previous_rank_date AS (
+      SELECT MAX(snapshot_date) AS d FROM trader_daily_ranks
+      WHERE snapshot_date < CURRENT_DATE
     ),
-    previous_leaderboard AS (
-      SELECT * FROM trader_leaderboard_snapshots
-      WHERE fetched_at >= (SELECT t FROM previous_leaderboard_time) - INTERVAL '1 minute'
-        AND fetched_at <= (SELECT t FROM previous_leaderboard_time)
-    ),
-    previous_scores AS (
-      SELECT DISTINCT ON (wallet) *
-      FROM trader_sirtio_scores
-      WHERE computed_at <= (SELECT t FROM previous_leaderboard_time) + INTERVAL '2 hours'
-      ORDER BY wallet, computed_at DESC
-    ),
-    -- Same ordering as the final SELECT below (score DESC, NULLS LAST),
-    -- so a previous rank means the same thing as today's rank.
-    previous_ranked AS (
-      SELECT
-        l.wallet,
-        ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC) AS prev_rank
-      FROM previous_leaderboard l
-      LEFT JOIN previous_scores s ON s.wallet = l.wallet
+    previous_ranks AS (
+      SELECT wallet, rank AS prev_rank
+      FROM trader_daily_ranks
+      WHERE snapshot_date = (SELECT d FROM previous_rank_date)
     )
     SELECT
       l.rank,
@@ -219,7 +206,7 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
       p.prev_rank
     FROM latest_leaderboard l
     LEFT JOIN latest_scores s ON s.wallet = l.wallet
-    LEFT JOIN previous_ranked p ON p.wallet = l.wallet
+    LEFT JOIN previous_ranks p ON p.wallet = l.wallet
     ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC
     LIMIT ${limit}
   `;
@@ -233,21 +220,23 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
 }
 
 export async function getHeroStats(): Promise<HeroStats> {
-  // market_snapshots has been upserted to one row per (source, external_id)
-  // since the 2026-08-14 fix (see run_pipeline.py), enforced by a unique
-  // index -- so a plain COUNT/SUM now gives the same numbers the old
-  // DISTINCT ON version did, without the full-table sort that was driving
-  // egress and DB load (see project chat, 2026-08-17 egress investigation).
+  // total_positions sums each wallet's position_count from their most
+  // recent trader_sirtio_scores row (one row per wallet, latest
+  // computed_at) -- trader_sirtio_scores is append-only (a new row per
+  // wallet every pipeline run), so a plain SUM would double-count a
+  // wallet's positions once for every run it's been scored in. The
+  // DISTINCT ON subquery picks only each wallet's latest row first.
   const [row] = await sql<HeroStats[]>`
     SELECT
-      (SELECT COUNT(*) FROM market_snapshots) AS total_markets,
-      (SELECT COALESCE(SUM(volume), 0) FROM market_snapshots) AS total_volume,
-      (SELECT COUNT(DISTINCT wallet) FROM trader_leaderboard_snapshots) AS total_traders,
-      (SELECT MAX(fetched_at) FROM market_snapshots) AS last_updated
+      (SELECT COALESCE(SUM(position_count), 0) FROM (
+        SELECT DISTINCT ON (wallet) position_count
+        FROM trader_sirtio_scores
+        ORDER BY wallet, computed_at DESC
+      ) latest_scores) AS total_positions,
+      (SELECT COUNT(DISTINCT wallet) FROM trader_leaderboard_snapshots) AS total_traders
   `;
   return {
-    ...row,
-    total_markets: Number(row.total_markets),
+    total_positions: Number(row.total_positions),
     total_traders: Number(row.total_traders),
   };
 }

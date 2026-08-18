@@ -204,14 +204,17 @@ export default async function TraderPage({
   }
 
   const name = getDisplayName(stats.username, stats.wallet);
-  // Structured data for rich snippets. AggregateRating is the
-  // schema.org field Google actually surfaces as a visible number in
-  // search results, so the Sirtio Score is mapped there (worstRating 0,
-  // bestRating 100, matching the site's own display scale) rather than
-  // buried in a generic property. additionalProperty carries the rest
-  // (rank, avg edge, position count, realized PnL, tier) as structured
-  // PropertyValue entries -- real values pulled from this page's own
-  // stats, so this can't drift out of sync with what's rendered below.
+  // Structured data for rich snippets. Google Search Console flagged
+  // this page's markup with "Invalid object type for field <parent_node>"
+  // -- AggregateRating is only valid as a property of specific
+  // schema.org types Google's Review-snippet validator recognizes
+  // (Product, LocalBusiness, Book, Course, Event, Movie, Recipe,
+  // SoftwareApplication, and a handful of others). Person -- what this
+  // page's mainEntity is -- isn't one of them, so nesting aggregateRating
+  // under a Person is structurally invalid regardless of the values
+  // inside it. The Sirtio Score is carried as a plain PropertyValue in
+  // additionalProperty instead, alongside the rest of the trader's
+  // stats -- same information, no invalid nesting.
   const traderJsonLd = {
     "@context": "https://schema.org",
     "@type": "ProfilePage",
@@ -222,20 +225,10 @@ export default async function TraderPage({
       "@type": "Person",
       name,
       identifier: stats.wallet,
-      ...(stats.pm_score !== null && {
-        aggregateRating: {
-          "@type": "AggregateRating",
-          ratingValue: stats.pm_score.toFixed(1),
-          bestRating: "100",
-          worstRating: "0",
-          ratingCount: stats.position_count,
-          itemReviewed: {
-            "@type": "Thing",
-            name: `${name}'s Polymarket trading performance`,
-          },
-        },
-      }),
       additionalProperty: [
+        ...(stats.pm_score !== null
+          ? [{ "@type": "PropertyValue", name: "Sirtio Score", value: stats.pm_score.toFixed(1) }]
+          : []),
         ...(stats.rank !== null
           ? [{ "@type": "PropertyValue", name: "Sirtio Leaderboard Rank", value: stats.rank }]
           : []),
