@@ -1,22 +1,6 @@
 import sql from "./db";
 import { cache } from "react";
 
-export type Market = {
-  source: string;
-  external_id: string;
-  slug: string | null;
-  title: string;
-  category: string | null;
-  yes_price_cents: number | null;
-  no_price_cents: number | null;
-  volume: number | null;
-  open_interest: number | null;
-  status: string | null;
-  close_time: string | null;
-  result: string | null;
-  fetched_at: string;
-};
-
 export type LeaderboardTrader = {
   rank: number | null;
   wallet: string;
@@ -34,23 +18,6 @@ export type HeroStats = {
   total_positions: number;
   total_traders: number;
 };
-
-export async function getTopMarkets(limit = 20): Promise<Market[]> {
-  // Same simplification as getHeroStats below: market_snapshots is one
-  // row per (source, external_id) since the 2026-08-14 upsert fix, so
-  // the DISTINCT ON here was pure wasted read/egress. Filtering,
-  // ordering, and limiting in SQL (rather than fetching every row and
-  // doing it in JS) keeps this the top-N read it's meant to be.
-  return sql<Market[]>`
-    SELECT
-      source, external_id, slug, title, category, yes_price_cents, no_price_cents,
-      volume, open_interest, status, close_time, result, fetched_at
-    FROM market_snapshots
-    WHERE status IN ('open', 'active')
-    ORDER BY volume DESC NULLS LAST
-    LIMIT ${limit}
-  `;
-}
 
 /**
  * PM Score, redefined 2026-08-13 around realized PnL only -- win rate

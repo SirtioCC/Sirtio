@@ -13,8 +13,6 @@ from datetime import datetime, timezone
 import psycopg2
 import psycopg2.extras
 
-import fetch_kalshi
-import fetch_polymarket
 import fetch_polymarket_leaderboard
 import fetch_polymarket_closed_positions
 import fetch_polymarket_activity
@@ -22,40 +20,6 @@ import realized_pnl
 import sirtio_score
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS market_snapshots (
-    id BIGSERIAL PRIMARY KEY,
-    source TEXT NOT NULL,
-    external_id TEXT NOT NULL,
-    slug TEXT,
-    title TEXT,
-    category TEXT,
-    yes_price_cents DOUBLE PRECISION,
-    no_price_cents DOUBLE PRECISION,
-    volume DOUBLE PRECISION,
-    open_interest DOUBLE PRECISION,
-    status TEXT,
-    close_time TEXT,
-    result TEXT,
-    fetched_at TIMESTAMPTZ NOT NULL
-);
--- market_snapshots already existed before slug was added -- CREATE TABLE
--- IF NOT EXISTS above is a no-op against it, so add the column explicitly.
-ALTER TABLE market_snapshots ADD COLUMN IF NOT EXISTS slug TEXT;
--- Switched from append-only (a new row every run, forever) to one row
--- per market, upserted in place -- 2026-08-14. Nothing on the site
--- reads historical snapshots (getTopMarkets only ever reads the latest
--- row per market), so every prior snapshot was pure unused storage
--- growth: 979K rows and climbing before this fix, purely from running
--- daily with no cap. Requires a ONE-TIME manual cleanup in Supabase
--- first (see migration note in this file's changelog/PR) to dedupe
--- existing rows before this unique index can be created -- a table
--- with existing duplicate (source, external_id) pairs will fail this
--- CREATE UNIQUE INDEX outright, breaking every pipeline run until the
--- cleanup is done.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_market_snapshots_unique
-    ON market_snapshots(source, external_id);
-CREATE INDEX IF NOT EXISTS idx_fetched_at ON market_snapshots(fetched_at);
-
 CREATE TABLE IF NOT EXISTS trader_leaderboard_snapshots (
     id BIGSERIAL PRIMARY KEY,
     source TEXT NOT NULL DEFAULT 'polymarket',
@@ -219,7 +183,7 @@ CREATE TABLE IF NOT EXISTS sirtio_score_population_stats (
 -- Tracks each pipeline run's outcome, independent of any individual
 -- table's data -- added 2026-08-16 so the site can show a real "last
 -- refreshed" timestamp. Deliberately NOT derived from MAX(fetched_at)
--- on market_snapshots/trader_realized_pnl_events/etc: every stage in
+-- on trader_realized_pnl_events/etc: every stage in
 -- run() below already catches its own exceptions and continues (by
 -- design -- a Kalshi failure shouldn't block Polymarket), so a table
 -- can have a fresh fetched_at even on a run where something else
@@ -236,27 +200,6 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_pipeline_runs_status_completed
     ON pipeline_runs(status, completed_at DESC);
-"""
-
-INSERT_SQL = """
-INSERT INTO market_snapshots
-(source, external_id, slug, title, category, yes_price_cents, no_price_cents,
- volume, open_interest, status, close_time, result, fetched_at)
-VALUES (%(source)s, %(external_id)s, %(slug)s, %(title)s, %(category)s, %(yes_price_cents)s,
-        %(no_price_cents)s, %(volume)s, %(open_interest)s, %(status)s,
-        %(close_time)s, %(result)s, %(fetched_at)s)
-ON CONFLICT (source, external_id) DO UPDATE SET
-    slug = EXCLUDED.slug,
-    title = EXCLUDED.title,
-    category = EXCLUDED.category,
-    yes_price_cents = EXCLUDED.yes_price_cents,
-    no_price_cents = EXCLUDED.no_price_cents,
-    volume = EXCLUDED.volume,
-    open_interest = EXCLUDED.open_interest,
-    status = EXCLUDED.status,
-    close_time = EXCLUDED.close_time,
-    result = EXCLUDED.result,
-    fetched_at = EXCLUDED.fetched_at
 """
 
 LEADERBOARD_INSERT_SQL = """
@@ -371,17 +314,6 @@ def get_connection():
         )
         sys.exit(1)
     return psycopg2.connect(db_url)
-
-
-def save_to_supabase(rows):
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(SCHEMA)
-            psycopg2.extras.execute_batch(cur, INSERT_SQL, rows)
-        conn.commit()
-    finally:
-        conn.close()
 
 
 def fetch_latest_leaderboard_timestamp(conn):
@@ -722,30 +654,6 @@ def run():
     stage_failures = []  # short labels; non-empty at the end means status='failed'
 
     try:
-        all_rows = []
-
-        try:
-            kalshi_rows = fetch_kalshi.run()
-            print(f"Kalshi: {len(kalshi_rows)} markets")
-            all_rows.extend(kalshi_rows)
-        except Exception as e:
-            print(f"Kalshi fetch failed: {e}")
-            stage_failures.append("kalshi")
-
-        try:
-            poly_rows = fetch_polymarket.run()
-            print(f"Polymarket: {len(poly_rows)} markets")
-            all_rows.extend(poly_rows)
-        except Exception as e:
-            print(f"Polymarket fetch failed: {e}")
-            stage_failures.append("polymarket")
-
-        if all_rows:
-            save_to_supabase(all_rows)
-            print(f"Saved {len(all_rows)} rows to Supabase")
-        else:
-            print("No rows fetched - nothing saved.")
-
         try:
             leaderboard_rows = fetch_polymarket_leaderboard.run()
             print(f"Polymarket leaderboard: {len(leaderboard_rows)} traders")
