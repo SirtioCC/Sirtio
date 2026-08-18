@@ -41,11 +41,10 @@ export const metadata: Metadata = {
     template: "%s | Sirtio",
   },
   description:
-    "Market data and trader skill scores across Kalshi and Polymarket. Is this trader actually good, or did they get lucky?",
+    "Market data and trader skill scores on Polymarket. Is this trader actually good, or did they get lucky?",
   keywords: [
     "prediction markets",
     "polymarket",
-    "kalshi",
     "polymarket trader leaderboard",
     "prediction market analytics",
     "polymarket accuracy",
@@ -55,14 +54,14 @@ export const metadata: Metadata = {
     siteName: "Sirtio",
     title: "Sirtio: Prediction Market Intelligence",
     description:
-      "Market data and trader skill scores across Kalshi and Polymarket. Is this trader actually good, or did they get lucky?",
+      "Market data and trader skill scores on Polymarket. Is this trader actually good, or did they get lucky?",
     url: SITE_URL,
   },
   twitter: {
     card: "summary_large_image",
     title: "Sirtio: Prediction Market Intelligence",
     description:
-      "Market data and trader skill scores across Kalshi and Polymarket. Is this trader actually good, or did they get lucky?",
+      "Market data and trader skill scores on Polymarket. Is this trader actually good, or did they get lucky?",
   },
   robots: {
     index: true,
@@ -84,7 +83,7 @@ export default function RootLayout({
     name: "Sirtio",
     url: SITE_URL,
     description:
-      "Market data and trader skill scores across Kalshi and Polymarket.",
+      "Market data and trader skill scores on Polymarket.",
   };
 
   return (

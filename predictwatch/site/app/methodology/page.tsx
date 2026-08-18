@@ -247,9 +247,8 @@ export default function MethodologyPage() {
             <span className="text-signal-no mt-1">-</span>
             <span>
               <strong className="text-parchment">Polymarket only.</strong>{" "}
-              Kalshi doesn't expose public trader data, so there's no
-              cross-platform comparison. Only Polymarket wallets get
-              scored.
+              There's no cross-platform comparison. Only Polymarket
+              wallets get scored.
             </span>
           </li>
           <li className="flex gap-3">

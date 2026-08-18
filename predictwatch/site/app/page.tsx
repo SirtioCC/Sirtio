@@ -18,12 +18,12 @@ export default async function Home() {
         <div className="grid lg:grid-cols-[1fr_320px] gap-12 items-start">
           <div>
             <p className="font-mono text-xs uppercase tracking-widest text-accent mb-6">
-              Kalshi · Polymarket
+              Polymarket
             </p>
             <h1 className="font-[family-name:var(--font-title)] font-bold text-5xl md:text-6xl leading-[1.05] max-w-3xl text-parchment">
-              Is this trader{" "}
-              <span className="italic text-accent">actually good</span>, or did
-              they get lucky?
+              Find the traders who{" "}
+              <span className="italic text-accent">actually know</span> what
+              they&apos;re doing.
             </h1>
             <p className="mt-6 text-lg text-muted max-w-xl">
               Every prediction-market leaderboard ranks by raw dollars, so

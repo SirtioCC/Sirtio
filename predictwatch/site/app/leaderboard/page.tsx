@@ -81,7 +81,7 @@ export default async function LeaderboardPage() {
           Trader Leaderboard
         </h1>
         <p className="text-body mb-2">
-          Polymarket only. Kalshi doesn't expose public trader data.
+          Polymarket only.
           This leaderboard draws from Polymarket's own public
           "Monthly" leaderboard, the top 100 traders by profit over
           the last 30 days. It's not every Polymarket trader, and

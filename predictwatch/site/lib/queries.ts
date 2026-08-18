@@ -383,7 +383,7 @@ export const resolveWallet = cache(async (input: string): Promise<string | null>
  * Deliberately reads pipeline_runs (a real per-run outcome record) and
  * NOT MAX(fetched_at) on any individual table -- every stage in
  * run_pipeline.py's run() already catches its own exceptions and
- * continues (a Kalshi failure shouldn't block Polymarket, etc.), so a
+ * continues (a failure in one stage shouldn't block the others), so a
  * given table's fetched_at can look fresh even on a run where some
  * other stage failed. status='success' is only written by
  * run_pipeline.py once EVERY stage completes cleanly -- a 'running' or
