@@ -301,39 +301,54 @@ export type TraderPosition = {
 };
 
 export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail | null> => {
+  // Resolves ANY wallet Sirtio has ever seen, not just ones on Polymarket's
+  // current top-100 monthly leaderboard -- 2026-08-18 fix. A wallet that
+  // falls off that leaderboard used to make this whole query return zero
+  // rows (it only ever selected FROM the current-cohort CTE), which
+  // 404'd the trader's page even though their score/position history was
+  // still sitting untouched in Supabase. Followed traders especially
+  // can't be allowed to just vanish. `all_wallets` (their last-known row,
+  // regardless of freshness) is now always the resolution source; the
+  // current-cohort filter is used ONLY to compute a live Sirtio rank,
+  // which correctly comes back null for a wallet that isn't part of
+  // today's ranked cohort -- the page already renders that case (see
+  // app/trader/[wallet]/page.tsx's `stats.rank !== null` checks).
   const rows = await sql<TraderDetail[]>`
-    WITH latest_leaderboard AS (
+    WITH current_leaderboard AS (
       SELECT * FROM trader_leaderboard_snapshots
       WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
+    ),
+    all_wallets AS (
+      SELECT DISTINCT ON (wallet) *
+      FROM trader_leaderboard_snapshots
+      ORDER BY wallet, fetched_at DESC
     ),
     latest_scores AS (
       SELECT DISTINCT ON (wallet) *
       FROM trader_sirtio_scores
       ORDER BY wallet, computed_at DESC
     ),
-    scored AS (
-      SELECT
-        l.wallet,
-        l.username,
-        l.rank AS polymarket_rank,
-        l.volume,
-        COALESCE(s.realized_pnl_90d, 0) AS realized_pnl_90d,
-        COALESCE(s.position_count, 0) AS position_count,
-        s.avg_edge_pct,
-        s.z_score,
-        s.sirtio_score AS pm_score
-      FROM latest_leaderboard l
-      LEFT JOIN latest_scores s ON s.wallet = l.wallet
-    ),
     ranked AS (
       SELECT
-        *,
-        ROW_NUMBER() OVER (ORDER BY pm_score DESC NULLS LAST, polymarket_rank ASC) AS rank
-      FROM scored
+        l.wallet,
+        ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC) AS rank
+      FROM current_leaderboard l
+      LEFT JOIN latest_scores s ON s.wallet = l.wallet
     )
-    SELECT wallet, username, rank, volume, realized_pnl_90d, position_count, avg_edge_pct, z_score, pm_score
-    FROM ranked
-    WHERE wallet = ${wallet}
+    SELECT
+      w.wallet,
+      w.username,
+      r.rank,
+      w.volume,
+      COALESCE(s.realized_pnl_90d, 0) AS realized_pnl_90d,
+      COALESCE(s.position_count, 0) AS position_count,
+      s.avg_edge_pct,
+      s.z_score,
+      s.sirtio_score AS pm_score
+    FROM all_wallets w
+    LEFT JOIN latest_scores s ON s.wallet = w.wallet
+    LEFT JOIN ranked r ON r.wallet = w.wallet
+    WHERE w.wallet = ${wallet}
   `;
   if (rows.length === 0) return null;
   const r = rows[0];
@@ -397,10 +412,20 @@ export const resolveWallet = cache(async (input: string): Promise<string | null>
   if (/^0x[a-fA-F0-9]{10,}$/.test(trimmed)) {
     return trimmed.toLowerCase();
   }
+  // Matches against each wallet's most recently known username, not just
+  // usernames on today's current leaderboard fetch -- 2026-08-18 fix, same
+  // reasoning as getTraderStats above. Without this, a username-based
+  // trader page (e.g. someone typing a known trader's name) would 404 the
+  // moment that trader fell off Polymarket's current monthly leaderboard,
+  // even though getTraderStats itself now resolves that wallet fine once
+  // given the raw address.
   const rows = await sql<{ wallet: string }[]>`
-    SELECT wallet FROM trader_leaderboard_snapshots
-    WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
-      AND LOWER(username) = LOWER(${trimmed})
+    SELECT wallet FROM (
+      SELECT DISTINCT ON (wallet) wallet, username
+      FROM trader_leaderboard_snapshots
+      ORDER BY wallet, fetched_at DESC
+    ) w
+    WHERE LOWER(username) = LOWER(${trimmed})
     LIMIT 1
   `;
   return rows.length > 0 ? rows[0].wallet : null;

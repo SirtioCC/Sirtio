@@ -300,16 +300,20 @@ export default async function TraderPage({
 
         <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
           <div className="bg-surface-raised border border-accent/40 rounded-lg p-5 flex items-start gap-10">
-            {stats.rank !== null && (
-              <div className="text-center">
-                <p className="font-mono text-xs uppercase tracking-wide text-muted">
-                  Rank
-                </p>
+            <div className="text-center">
+              <p className="font-mono text-xs uppercase tracking-wide text-muted">
+                Rank
+              </p>
+              {stats.rank !== null ? (
                 <p className="font-[family-name:var(--font-display)] italic text-3xl text-parchment">
                   #{stats.rank}
                 </p>
-              </div>
-            )}
+              ) : (
+                <p className="text-xs text-muted mt-1 max-w-[10rem]">
+                  Not on Polymarket&apos;s current monthly leaderboard
+                </p>
+              )}
+            </div>
             <div className="text-center">
               <p className="font-mono text-xs uppercase tracking-wide text-muted">
                 Sirtio score

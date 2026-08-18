@@ -369,6 +369,58 @@ def fetch_latest_leaderboard_timestamp(conn):
         return row[0].isoformat() if row and row[0] else None
 
 
+def fetch_followed_wallets(conn):
+    """
+    Wallets any site user follows (site/components/FollowButton.tsx writes
+    to this table directly via Supabase, so it lives in the same Postgres
+    database this pipeline connects to -- no separate credential needed).
+
+    Followed wallets get merged into this run's wallet list (see run()
+    below) so a trader doesn't stop getting fresh activity/scores just
+    because they fell off Polymarket's own top-100 monthly leaderboard --
+    a user who followed them still needs a live, updating page. Wrapped in
+    a try/except at the call site: if the `follows` table doesn't exist
+    yet in some environment, that shouldn't take down the whole pipeline
+    run, just fall back to leaderboard-only wallets like before.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT wallet FROM follows WHERE wallet IS NOT NULL")
+        return {row[0] for row in cur.fetchall()}
+
+
+def prune_old_sirtio_scores(conn, retention_days=90):
+    """
+    trader_sirtio_scores is append-only by design (see save_sirtio_scores)
+    -- getTraderScoreHistory only ever charts the last 30 days, so full
+    history beyond that is pure unused storage growth, same category of
+    problem already fixed once for market_snapshots and
+    trader_leaderboard_snapshots (see their upsert comments above).
+
+    Deliberately NOT a blanket "delete anything older than N days": that
+    would erase the *current* score for any wallet that hasn't been
+    re-scored recently (e.g. a followed-but-currently-inactive trader),
+    which is exactly the data this change is trying to keep alive. The
+    EXISTS clause protects each wallet's single most-recent row
+    unconditionally, however old it is -- only strictly-older rows for
+    a wallet that already has a newer one get deleted.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM trader_sirtio_scores a
+            WHERE a.computed_at < NOW() - (%s * INTERVAL '1 day')
+              AND EXISTS (
+                SELECT 1 FROM trader_sirtio_scores b
+                WHERE b.wallet = a.wallet AND b.computed_at > a.computed_at
+              )
+            """,
+            (retention_days,),
+        )
+        deleted = cur.rowcount
+    conn.commit()
+    return deleted
+
+
 def save_leaderboard_to_supabase(rows):
     # source defaulted here rather than assumed present on each row --
     # fetch_polymarket_leaderboard.py's exact row shape wasn't in hand
@@ -620,7 +672,30 @@ def run():
         # 300-page/150,000-row safety net. Pure wasted runtime for unused
         # data. trader_positions_snapshots itself is left alone in Supabase
         # (old data, harmless, just stops growing) rather than dropped.
-        wallets = list({r["wallet"] for r in leaderboard_rows if r.get("wallet")})
+        # Wallet list = this run's Polymarket leaderboard, UNION any wallet a
+        # site user follows. Without the follows union, a trader who falls
+        # off Polymarket's own top-100 monthly leaderboard stops getting
+        # fresh activity/scores forever, even if a Sirtio user is actively
+        # following them -- their page goes stale and, worse, their old
+        # score naturally expires once none of their historical positions
+        # remain inside the 90-day scoring window (see sirtio_score.py's
+        # fetch_position_returns). Bounded growth: this set only grows via
+        # real user follows or genuine new leaderboard entrants, not via
+        # every wallet that has ever transiently ranked (that was rejected
+        # as unbounded -- see project chat, 2026-08-18 retention discussion).
+        leaderboard_wallets = {r["wallet"] for r in leaderboard_rows if r.get("wallet")}
+        try:
+            conn = get_connection()
+            try:
+                followed_wallets = fetch_followed_wallets(conn)
+            finally:
+                conn.close()
+            print(f"Followed wallets to keep tracking: {len(followed_wallets)}")
+        except Exception as e:
+            print(f"Fetching followed wallets failed: {e} -- continuing with "
+                  f"leaderboard wallets only")
+            followed_wallets = set()
+        wallets = list(leaderboard_wallets | followed_wallets)
 
         try:
             if wallets:
@@ -737,6 +812,20 @@ def run():
         except Exception as e:
             print(f"Sirtio Score computation failed: {e}")
             stage_failures.append("sirtio_score")
+
+        # Retention cleanup, not a fetch stage -- doesn't affect
+        # stage_failures/success status, since a failure here shouldn't
+        # mark an otherwise-good refresh as failed.
+        try:
+            conn = get_connection()
+            try:
+                deleted = prune_old_sirtio_scores(conn)
+            finally:
+                conn.close()
+            print(f"Pruned {deleted} trader_sirtio_scores row(s) older than "
+                  f"90 days (each wallet's latest row is always kept)")
+        except Exception as e:
+            print(f"trader_sirtio_scores retention cleanup failed: {e}")
 
         if stage_failures:
             print(f"\nPipeline run completed with failures in: {stage_failures} "
