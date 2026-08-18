@@ -36,11 +36,11 @@ export default function FollowButton({ wallet }: { wallet: string }) {
     }
     setLoading(true);
     if (following) {
-      await supabase.from("follows").delete().eq("user_id", userId).eq("wallet", wallet);
-      setFollowing(false);
+      const { error } = await supabase.from("follows").delete().eq("user_id", userId).eq("wallet", wallet);
+      if (!error) setFollowing(false);
     } else {
-      await supabase.from("follows").insert({ user_id: userId, wallet });
-      setFollowing(true);
+      const { error } = await supabase.from("follows").insert({ user_id: userId, wallet });
+      if (!error) setFollowing(true);
     }
     setLoading(false);
   }

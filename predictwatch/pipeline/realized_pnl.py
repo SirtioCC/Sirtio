@@ -461,6 +461,11 @@ def force_close_abandoned_positions(wallet: str, open_positions: dict):
             # roughly the right window; flagged here so it's a known
             # simplification, not a hidden one.
             "closed_at": now_iso,
+            # No real event/tx backs a force-close, so the upsert key is
+            # derived from (condition_id, asset) rather than fetch time --
+            # deterministic across retries, matching the MERGE fallback
+            # pattern above instead of minting a new row every run.
+            "transaction_hash": f"missing-txhash:{pos['condition_id']}:FORCE_CLOSE_RESOLVED:{asset}",
         })
     return realized
 

@@ -40,17 +40,18 @@ export type HeroStats = {
 export async function getTopMarkets(limit = 20): Promise<Market[]> {
   // Same simplification as getHeroStats below: market_snapshots is one
   // row per (source, external_id) since the 2026-08-14 upsert fix, so
-  // the DISTINCT ON + full sort here was pure wasted read/egress.
-  const rows = await sql<Market[]>`
+  // the DISTINCT ON here was pure wasted read/egress. Filtering,
+  // ordering, and limiting in SQL (rather than fetching every row and
+  // doing it in JS) keeps this the top-N read it's meant to be.
+  return sql<Market[]>`
     SELECT
       source, external_id, slug, title, category, yes_price_cents, no_price_cents,
       volume, open_interest, status, close_time, result, fetched_at
     FROM market_snapshots
+    WHERE status IN ('open', 'active')
+    ORDER BY volume DESC NULLS LAST
+    LIMIT ${limit}
   `;
-  return rows
-    .filter((r) => r.status === "open" || r.status === "active")
-    .sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0))
-    .slice(0, limit);
 }
 
 /**
