@@ -27,6 +27,26 @@ precomputed number.
 import math
 from datetime import datetime, timezone
 
+# Below this cost basis, a percent return is too noisy to trust as a
+# skill signal -- a $2 position that resolves YES can legitimately
+# read as a 99,900% "return" (buying deep-discount shares right before
+# a near-certain resolution is a real, low-risk Polymarket strategy,
+# not bad data), but pooling that percentage in with everyone else's
+# distorts the whole population's mu/sigma2 far out of proportion to
+# the few real dollars actually at risk. Confirmed live 2026-08-18:
+# one wallet's run of sub-$70 positions (up to 99,900% each) pushed
+# sigma2 from ~70K to ~1.67M and collapsed tau2 to exactly 0 in a
+# single pipeline run, which zeroed out every OTHER trader's shrunk
+# edge (see compute_scores' tau2==0 branch) and broke that day's
+# scores site-wide, not just for the outlier wallet.
+MIN_POSITION_COST_BASIS = 25.0
+# Belt-and-suspenders on top of the cost-basis floor above: even a
+# position that clears MIN_POSITION_COST_BASIS can still produce an
+# extreme percent return (confirmed in the same incident: a $65.72
+# cost basis position read as an 8,642% return) that shouldn't be
+# allowed to dominate the pooled statistics on its own.
+MAX_ABS_PCT_RETURN = 1000.0
+
 
 def fetch_position_returns(conn):
     """
@@ -35,6 +55,19 @@ def fetch_position_returns(conn):
     later full exit produces multiple ledger rows for what is really
     one position, so this collapses them first, same reasoning as the
     site's old per-position SQL CTEs.
+
+    wallet_pnl (real dollar totals) includes every position regardless
+    of size -- a tiny cost basis doesn't distort a dollar sum the way
+    it distorts a percentage, and this is what the site displays as
+    Realized PnL, so it should reflect the full ledger. wallet_returns
+    (percent returns, feeding mu/sigma2/tau2 and each wallet's own
+    r_bar) excludes positions below MIN_POSITION_COST_BASIS or beyond
+    MAX_ABS_PCT_RETURN -- see the constants above for why. This does
+    mean position_count (len of a wallet's return list) can run a
+    little below their true total closed-position count for a wallet
+    with excluded dust positions; the site's own "All Positions" list
+    is a separate, unfiltered query and still shows every position.
+
     Returns (wallet_returns, wallet_pnl):
       wallet_returns: wallet -> list of per-position percent returns
       wallet_pnl:     wallet -> total realized PnL dollars (90d)
@@ -56,8 +89,10 @@ def fetch_position_returns(conn):
         pnl = float(pnl) if pnl is not None else 0.0
         cost_basis = float(cost_basis) if cost_basis is not None else 0.0
         wallet_pnl[wallet] = wallet_pnl.get(wallet, 0.0) + pnl
-        if cost_basis > 0:
-            wallet_returns.setdefault(wallet, []).append((pnl / cost_basis) * 100)
+        if cost_basis >= MIN_POSITION_COST_BASIS:
+            pct_return = (pnl / cost_basis) * 100
+            if abs(pct_return) <= MAX_ABS_PCT_RETURN:
+                wallet_returns.setdefault(wallet, []).append(pct_return)
     return wallet_returns, wallet_pnl
 
 
