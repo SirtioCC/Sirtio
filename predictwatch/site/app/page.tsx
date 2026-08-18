@@ -2,7 +2,14 @@ import Link from "next/link";
 import Nav from "@/components/Nav";
 import { getLeaderboard, getHeroStats } from "@/lib/queries";
 import { getDisplayName } from "@/lib/format";
-export const dynamic = "force-dynamic";
+// Was force-dynamic (fresh Supabase query on every single request) --
+// switched to a 5-minute revalidation window, same fix already applied
+// to leaderboard/page.tsx and trader/[wallet]/page.tsx after those hit
+// Supabase's free-tier egress cap. This is the site's actual entry
+// point, so it was serving a fresh DB round-trip (getLeaderboard,
+// getHeroStats, plus getLastRefresh via the shared Nav) to every single
+// visitor and crawler -- the single largest remaining egress source.
+export const revalidate = 300;
 
 export default async function Home() {
   const [leaderboard, stats] = await Promise.all([
