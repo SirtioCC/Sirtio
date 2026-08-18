@@ -38,12 +38,14 @@ export type HeroStats = {
 };
 
 export async function getTopMarkets(limit = 20): Promise<Market[]> {
+  // Same simplification as getHeroStats below: market_snapshots is one
+  // row per (source, external_id) since the 2026-08-14 upsert fix, so
+  // the DISTINCT ON + full sort here was pure wasted read/egress.
   const rows = await sql<Market[]>`
-    SELECT DISTINCT ON (source, external_id)
+    SELECT
       source, external_id, slug, title, category, yes_price_cents, no_price_cents,
       volume, open_interest, status, close_time, result, fetched_at
     FROM market_snapshots
-    ORDER BY source, external_id, fetched_at DESC
   `;
   return rows
     .filter((r) => r.status === "open" || r.status === "active")
@@ -230,13 +232,15 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
 }
 
 export async function getHeroStats(): Promise<HeroStats> {
+  // market_snapshots has been upserted to one row per (source, external_id)
+  // since the 2026-08-14 fix (see run_pipeline.py), enforced by a unique
+  // index -- so a plain COUNT/SUM now gives the same numbers the old
+  // DISTINCT ON version did, without the full-table sort that was driving
+  // egress and DB load (see project chat, 2026-08-17 egress investigation).
   const [row] = await sql<HeroStats[]>`
     SELECT
-      (SELECT COUNT(DISTINCT (source, external_id)) FROM market_snapshots) AS total_markets,
-      (SELECT COALESCE(SUM(volume), 0) FROM (
-        SELECT DISTINCT ON (source, external_id) volume
-        FROM market_snapshots ORDER BY source, external_id, fetched_at DESC
-      ) t) AS total_volume,
+      (SELECT COUNT(*) FROM market_snapshots) AS total_markets,
+      (SELECT COALESCE(SUM(volume), 0) FROM market_snapshots) AS total_volume,
       (SELECT COUNT(DISTINCT wallet) FROM trader_leaderboard_snapshots) AS total_traders,
       (SELECT MAX(fetched_at) FROM market_snapshots) AS last_updated
   `;
