@@ -2,8 +2,7 @@ import Link from "next/link";
 import Nav from "@/components/Nav";
 import CopyableWallet from "@/components/CopyableWallet";
 import FollowButton from "@/components/FollowButton";
-import { getTraderStats, getTraderPositions, getTraderScoreHistory, resolveWallet, type TraderPosition } from "@/lib/queries";
-import ScoreHistoryChart from "@/components/ScoreHistoryChart";
+import { getTraderStats, getTraderPositions, resolveWallet, type TraderPosition } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 // Was force-dynamic (fresh Supabase query on every single request) --
 // switched to a 5-minute revalidation window 2026-08-16 after this
@@ -177,7 +176,6 @@ export default async function TraderPage({
 
   const stats = await getTraderStats(wallet);
   const positions = await getTraderPositions(wallet);
-  const scoreHistory = await getTraderScoreHistory(wallet);
 
   const noData =
     !stats ||
@@ -331,15 +329,6 @@ export default async function TraderPage({
             </p>
           </div>
         </div>
-
-        {scoreHistory.length >= 2 && (
-          <div className="mt-10">
-            <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mb-4">
-              Score History (30d)
-            </h2>
-            <ScoreHistoryChart points={scoreHistory} />
-          </div>
-        )}
 
         <div className="mt-10">
           <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mb-6">

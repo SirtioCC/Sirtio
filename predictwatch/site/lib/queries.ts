@@ -234,29 +234,6 @@ export type TraderDetail = {
   pm_score: number | null;
 };
 
-export type ScoreHistoryPoint = {
-  computed_at: string;
-  sirtio_score: number | null;
-};
-
-/**
- * Backs the score-history chart on the trader page, added 2026-08-17.
- * Only possible because of the snapshot-history fix earlier the same
- * day -- trader_sirtio_scores now keeps one row per pipeline run
- * instead of upserting over the previous score, so a real day-over-day
- * trend exists to chart. Before that fix this table only ever held
- * the current score, so this data simply didn't exist yet.
- */
-export async function getTraderScoreHistory(wallet: string): Promise<ScoreHistoryPoint[]> {
-  return sql<ScoreHistoryPoint[]>`
-    SELECT computed_at, sirtio_score
-    FROM trader_sirtio_scores
-    WHERE wallet = ${wallet}
-      AND computed_at >= NOW() - INTERVAL '30 days'
-    ORDER BY computed_at ASC
-  `;
-}
-
 export type TraderPosition = {
   condition_id: string | null;
   market_title: string | null;
