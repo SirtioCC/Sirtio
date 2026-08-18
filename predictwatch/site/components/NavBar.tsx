@@ -9,7 +9,6 @@ import { createClient } from "@/lib/supabase/client";
 import { logout } from "@/app/auth/actions";
 
 const NAV_LINKS = [
-  { href: "/markets", label: "Markets" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/methodology", label: "Methodology" },
   { href: "/contact", label: "Contact" },

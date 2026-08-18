@@ -1,14 +1,8 @@
 import Link from "next/link";
 import Nav from "@/components/Nav";
-import ProbabilityBar from "@/components/ProbabilityBar";
-import { getTopMarkets, getLeaderboard, getHeroStats } from "@/lib/queries";
-import { getDisplayName, marketSourceUrl } from "@/lib/format";
+import { getLeaderboard, getHeroStats } from "@/lib/queries";
+import { getDisplayName } from "@/lib/format";
 export const dynamic = "force-dynamic";
-
-function formatVolume(v: number | null) {
-  if (!v) return "$0";
-  return `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-}
 
 // Exception: the hero "Volume tracked" total is large enough (billions)
 // that the full number collides with the adjacent stat in the hero row
@@ -23,8 +17,7 @@ function formatVolumeAbbreviated(v: number | null) {
 }
 
 export default async function Home() {
-  const [markets, leaderboard, stats] = await Promise.all([
-    getTopMarkets(6),
+  const [leaderboard, stats] = await Promise.all([
     getLeaderboard(10),
     getHeroStats(),
   ]);
@@ -61,12 +54,6 @@ export default async function Home() {
                 className="px-5 py-3 bg-accent text-ink font-medium rounded-md hover:opacity-90 transition-opacity"
               >
                 See the leaderboard
-              </Link>
-              <Link
-                href="/markets"
-                className="px-5 py-3 border border-hairline text-parchment rounded-md hover:border-muted transition-colors"
-              >
-                Browse markets
               </Link>
             </div>
 
@@ -127,52 +114,6 @@ export default async function Home() {
               </p>
             </div>
           )}
-        </div>
-      </section>
-
-      <section className="max-w-6xl mx-auto px-6 py-16 border-t border-hairline">
-        <div className="flex items-baseline justify-between mb-8">
-          <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment">
-            Most Active Markets
-          </h2>
-          <Link href="/markets" className="text-sm text-accent hover:underline">
-            View all --&gt;
-          </Link>
-        </div>
-        <div className="space-y-1">
-          {markets.map((m) => (
-            <div
-              key={`${m.source}-${m.external_id}`}
-              className="grid grid-cols-[1fr_70px] sm:grid-cols-[1fr_200px_90px] items-center gap-3 sm:gap-6 py-4 border-b border-hairline"
-            >
-              <div>
-                <p className="text-parchment">{m.title}</p>
-                <p className="text-xs text-muted mt-1 uppercase tracking-wide">
-                  {m.source} · {formatVolume(m.volume)} vol
-                  {marketSourceUrl(m.source, m.external_id, m.slug, m.title) && (
-                    <>
-                      {" "}
-                      ·{" "}
-                      <a
-                        href={marketSourceUrl(m.source, m.external_id, m.slug, m.title)!}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-accent hover:underline normal-case tracking-normal"
-                      >
-                        {m.source === "kalshi" ? "Search on Kalshi" : "View market"}
-                      </a>
-                    </>
-                  )}
-                </p>
-              </div>
-              <div className="hidden sm:block">
-                <ProbabilityBar yesPriceCents={m.yes_price_cents} hidePrice />
-              </div>
-              <span className="font-mono text-sm tabular-nums text-parchment text-right">
-                {m.yes_price_cents !== null ? `${Math.min(100, Math.max(0, m.yes_price_cents)).toFixed(0)}¢` : "--"}
-              </span>
-            </div>
-          ))}
         </div>
       </section>
 
