@@ -123,7 +123,7 @@ export default async function LeaderboardPage() {
               <span>#</span>
               <span>Trader</span>
               <span className="text-center">Sirtio Score</span>
-              <span className="hidden sm:block text-center">Change</span>
+              <span className="hidden sm:block text-center">Change (24hr)</span>
               <span className="hidden sm:block text-center">Resolved Bets (Last 90D)</span>
             </div>
             {scoredTraders.map((t, i) => (
