@@ -133,9 +133,9 @@ export default async function LeaderboardPage() {
                 <span className="font-mono text-muted text-sm">
                   {String(i + 1).padStart(2, "0")}
                 </span>
-                <div>
+                <div className="min-w-0">
                   <Link href={`/trader/${t.wallet}`}
-                    className="text-parchment hover:text-accent transition-colors"
+                    className="block truncate text-parchment hover:text-accent transition-colors"
                   >
                     {getDisplayName(t.username, t.wallet)}
                   </Link>
