@@ -80,10 +80,20 @@ export type HeroStats = {
  */
 export async function getFollowedTraders(wallets: string[]): Promise<LeaderboardTrader[]> {
   if (wallets.length === 0) return [];
+  // Sourced from all_wallets, same 2026-08-24 fix as getLeaderboard --
+  // a followed trader used to disappear from this list the moment they
+  // fell off Polymarket's current top-100 monthly pull, since the old
+  // latest_leaderboard CTE only ever contained that current cohort.
+  // Someone follows a wallet specifically to keep tabs on it, so it
+  // being followed can't be allowed to silently stop resolving. rank
+  // is computed the same way as getLeaderboard, over ALL discovered
+  // wallets, so a followed trader's rank number here matches what
+  // they'd see on the main leaderboard page.
   const rows = await sql<LeaderboardTrader[]>`
-    WITH latest_leaderboard AS (
-      SELECT * FROM trader_leaderboard_snapshots
-      WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
+    WITH all_wallets AS (
+      SELECT DISTINCT ON (wallet) *
+      FROM trader_leaderboard_snapshots
+      ORDER BY wallet, fetched_at DESC
     ),
     latest_scores AS (
       SELECT DISTINCT ON (wallet) *
@@ -92,16 +102,15 @@ export async function getFollowedTraders(wallets: string[]): Promise<Leaderboard
     ),
     ranked AS (
       SELECT
-        l.wallet,
-        ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC) AS rank
-      FROM latest_leaderboard l
-      LEFT JOIN latest_scores s ON s.wallet = l.wallet
+        w.wallet,
+        ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, w.wallet ASC) AS rank
+      FROM all_wallets w
+      LEFT JOIN latest_scores s ON s.wallet = w.wallet
     ),
-    latest_username AS (
-      SELECT DISTINCT ON (wallet) wallet, username
-      FROM trader_leaderboard_snapshots
+    followed_wallets AS (
+      SELECT wallet, username
+      FROM all_wallets
       WHERE wallet = ANY(${wallets})
-      ORDER BY wallet, fetched_at DESC
     )
     SELECT
       r.rank,
@@ -113,7 +122,7 @@ export async function getFollowedTraders(wallets: string[]): Promise<Leaderboard
       s.avg_edge_pct,
       s.z_score,
       s.sirtio_score AS pm_score
-    FROM latest_username u
+    FROM followed_wallets u
     LEFT JOIN latest_scores s ON s.wallet = u.wallet
     LEFT JOIN ranked r ON r.wallet = u.wallet
     ORDER BY s.sirtio_score DESC NULLS LAST
@@ -128,32 +137,53 @@ export async function getFollowedTraders(wallets: string[]): Promise<Leaderboard
 }
 
 export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
+  // Sourced from all_wallets (every wallet Sirtio has ever discovered,
+  // last-known row per wallet), not latest_leaderboard (only wallets in
+  // Polymarket's current top-100 monthly pull) -- 2026-08-24 fix. Under
+  // the old latest_leaderboard source, a wallet with a top Sirtio Score
+  // (e.g. Flipadelphia at 99.9) would silently disappear from this page
+  // the moment Polymarket's own rolling 30-day list dropped them, even
+  // though trader_sirtio_scores still had their full 90-day score sitting
+  // untouched in Supabase -- their individual trader page kept working
+  // (getTraderStats already resolves from all_wallets, 2026-08-18 fix)
+  // but the leaderboard listing didn't match. This makes the two
+  // consistent: this leaderboard is now a persistent ranking of every
+  // discovered trader by Sirtio Score, not a re-ranking of whoever
+  // currently happens to be on Polymarket's own list.
+  //
+  // `rank` is computed here via ROW_NUMBER() over sirtio_score, same
+  // pattern as getTraderStats -- the old l.rank column (Polymarket's own
+  // rank) doesn't mean anything once we're ranking wallets that aren't
+  // on Polymarket's current list at all. wallet is a deterministic
+  // tiebreaker for wallets with no score yet (NULLS LAST) or identical
+  // scores.
   const rows = await sql<Omit<LeaderboardTrader, "prev_rank">[]>`
-    WITH latest_leaderboard_time AS (
-      SELECT MAX(fetched_at) AS t FROM trader_leaderboard_snapshots
-    ),
-    latest_leaderboard AS (
-      SELECT * FROM trader_leaderboard_snapshots
-      WHERE fetched_at >= (SELECT t FROM latest_leaderboard_time) - INTERVAL '1 minute'
+    WITH all_wallets AS (
+      SELECT DISTINCT ON (wallet) *
+      FROM trader_leaderboard_snapshots
+      ORDER BY wallet, fetched_at DESC
     ),
     latest_scores AS (
       SELECT DISTINCT ON (wallet) *
       FROM trader_sirtio_scores
       ORDER BY wallet, computed_at DESC
+    ),
+    ranked AS (
+      SELECT
+        ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, w.wallet ASC) AS rank,
+        w.wallet,
+        w.username,
+        w.volume,
+        COALESCE(s.realized_pnl_90d, 0) AS realized_pnl_90d,
+        COALESCE(s.position_count, 0) AS position_count,
+        s.avg_edge_pct,
+        s.z_score,
+        s.sirtio_score AS pm_score
+      FROM all_wallets w
+      LEFT JOIN latest_scores s ON s.wallet = w.wallet
     )
-    SELECT
-      l.rank,
-      l.wallet,
-      l.username,
-      l.volume,
-      COALESCE(s.realized_pnl_90d, 0) AS realized_pnl_90d,
-      COALESCE(s.position_count, 0) AS position_count,
-      s.avg_edge_pct,
-      s.z_score,
-      s.sirtio_score AS pm_score
-    FROM latest_leaderboard l
-    LEFT JOIN latest_scores s ON s.wallet = l.wallet
-    ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC
+    SELECT * FROM ranked
+    ORDER BY rank ASC
     LIMIT ${limit}
   `;
 
@@ -255,17 +285,19 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
   // 404'd the trader's page even though their score/position history was
   // still sitting untouched in Supabase. Followed traders especially
   // can't be allowed to just vanish. `all_wallets` (their last-known row,
-  // regardless of freshness) is now always the resolution source; the
-  // current-cohort filter is used ONLY to compute a live Sirtio rank,
-  // which correctly comes back null for a wallet that isn't part of
-  // today's ranked cohort -- the page already renders that case (see
-  // app/trader/[wallet]/page.tsx's `stats.rank !== null` checks).
+  // regardless of freshness) is now always the resolution source.
+  //
+  // rank is ALSO computed over all_wallets, not just the current
+  // Polymarket cohort -- 2026-08-24 fix, same pattern as
+  // getLeaderboard/getFollowedTraders. Previously this page showed
+  // "Not on Polymarket's current monthly leaderboard" for any wallet
+  // outside the current top-100, even a top-scored one (e.g.
+  // Flipadelphia at 99.9) -- inconsistent with the main leaderboard,
+  // which now ranks that same wallet. rank comes back null here only
+  // for a wallet with no Sirtio Score at all, matching the leaderboard's
+  // own no-score case.
   const rows = await sql<TraderDetail[]>`
-    WITH current_leaderboard AS (
-      SELECT * FROM trader_leaderboard_snapshots
-      WHERE fetched_at >= (SELECT MAX(fetched_at) FROM trader_leaderboard_snapshots) - INTERVAL '1 minute'
-    ),
-    all_wallets AS (
+    WITH all_wallets AS (
       SELECT DISTINCT ON (wallet) *
       FROM trader_leaderboard_snapshots
       ORDER BY wallet, fetched_at DESC
@@ -277,10 +309,11 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
     ),
     ranked AS (
       SELECT
-        l.wallet,
-        ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, l.rank ASC) AS rank
-      FROM current_leaderboard l
-      LEFT JOIN latest_scores s ON s.wallet = l.wallet
+        w.wallet,
+        ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, w.wallet ASC) AS rank
+      FROM all_wallets w
+      LEFT JOIN latest_scores s ON s.wallet = w.wallet
+      WHERE s.sirtio_score IS NOT NULL
     )
     SELECT
       w.wallet,
