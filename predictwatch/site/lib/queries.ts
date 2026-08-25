@@ -353,6 +353,7 @@ export type TraderDetail = {
   avg_edge_pct: number | null;
   z_score: number | null;
   pm_score: number | null;
+  is_tracked: boolean;
 };
 
 export type TraderPosition = {
@@ -387,7 +388,21 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
   // which now ranks that same wallet. rank comes back null here only
   // for a wallet with no Sirtio Score at all, matching the leaderboard's
   // own no-score case.
-  const rows = await sql<TraderDetail[]>`
+  //
+  // is_tracked, added 2026-08-25: the pipeline's activity-fetch wallet
+  // list is now Sirtio's own top-100-by-score UNION followed wallets
+  // (see run_pipeline.py) -- a wallet ranked outside that top 100 with
+  // no followers stops getting new trade/redeem activity fetched at
+  // all, so its position ledger silently freezes at whatever it was
+  // the day it fell out (confirmed live: Flipadelphia's ledger froze
+  // exactly on the day he fell off Polymarket's OWN top-100, the old
+  // tracking criterion). Rank alone -- checked at page-render time --
+  // is a same-day-accurate proxy for "is the pipeline currently
+  // fetching this wallet's activity," since the pipeline computes that
+  // same top-100-by-score set at the start of each run. is_tracked ==
+  // false means the trader page should hide "All Positions" rather
+  // than show a table that looks live but silently stopped updating.
+  const rows = await sql<Omit<TraderDetail, "is_tracked">[]>`
     WITH all_wallets AS (
       SELECT DISTINCT ON (wallet) *
       FROM trader_leaderboard_snapshots
@@ -415,19 +430,24 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
       COALESCE(s.position_count, 0) AS position_count,
       s.avg_edge_pct,
       s.z_score,
-      s.sirtio_score AS pm_score
+      s.sirtio_score AS pm_score,
+      (
+        (r.rank IS NOT NULL AND r.rank <= 100)
+        OR EXISTS (SELECT 1 FROM follows f WHERE f.wallet = w.wallet)
+      ) AS is_tracked
     FROM all_wallets w
     LEFT JOIN latest_scores s ON s.wallet = w.wallet
     LEFT JOIN ranked r ON r.wallet = w.wallet
     WHERE w.wallet = ${wallet}
   `;
   if (rows.length === 0) return null;
-  const r = rows[0];
+  const r = rows[0] as TraderDetail;
   return {
     ...r,
     avg_edge_pct: r.avg_edge_pct !== null ? Number(r.avg_edge_pct) : null,
     z_score: r.z_score !== null ? Number(r.z_score) : null,
     pm_score: r.pm_score !== null ? Number(r.pm_score) : null,
+    is_tracked: Boolean(r.is_tracked),
   };
 });
 

@@ -342,6 +342,54 @@ def fetch_followed_wallets(conn):
         return {row[0] for row in cur.fetchall()}
 
 
+def fetch_top_scored_wallets(conn, limit=100):
+    """
+    Wallets currently in Sirtio's OWN top-{limit} by Sirtio Score --
+    added 2026-08-25 alongside fetch_followed_wallets, to close a real
+    gap it exposed. Activity-fetch eligibility was previously gated on
+    being in THIS run's Polymarket top-100 monthly pull (leaderboard_
+    wallets below) -- a completely different ranking than what the site
+    actually surfaces traders by. A wallet could rank #2 on Sirtio's own
+    leaderboard while having fallen off Polymarket's internal 30-day-
+    profit list days earlier; its trader_realized_pnl_events ledger then
+    silently froze at that point, forever, even as trader_sirtio_scores
+    kept recomputing a fresh row for it daily off the now-stale ledger --
+    confirmed live via Flipadelphia, whose ledger froze the exact day he
+    fell off Polymarket's list while the site kept ranking him #2 with
+    no indication anything had stopped updating.
+
+    Ranked the same way site/lib/queries.ts ranks the leaderboard --
+    latest score per wallet, ORDER BY sirtio_score DESC NULLS LAST,
+    wallet ASC as a deterministic tiebreaker -- so "top 100 tracked
+    here" and "top 100 shown on the site" are always the same set,
+    computed off yesterday's scores at the start of each run (today's
+    scores don't exist yet until this same run computes them further
+    down). Bounded growth, same property fetch_followed_wallets already
+    has: always ~limit wallets regardless of how many have ever been
+    discovered, unlike "track every wallet forever" (rejected as
+    unbounded -- see the 2026-08-18 retention discussion referenced
+    below) -- this just anchors the bound to Sirtio's own ranking
+    instead of Polymarket's.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            WITH latest_scores AS (
+                SELECT DISTINCT ON (wallet) wallet, sirtio_score
+                FROM trader_sirtio_scores
+                ORDER BY wallet, computed_at DESC
+            )
+            SELECT wallet
+            FROM latest_scores
+            WHERE sirtio_score IS NOT NULL
+            ORDER BY sirtio_score DESC, wallet ASC
+            LIMIT %s
+            """,
+            (limit,),
+        )
+        return {row[0] for row in cur.fetchall()}
+
+
 def prune_old_sirtio_scores(conn, retention_days=90):
     """
     trader_sirtio_scores is append-only by design (see save_sirtio_scores)
@@ -665,45 +713,50 @@ def run():
             stage_failures.append("leaderboard")
             leaderboard_rows = []
 
-        # NOTE: previously also fetched /positions ("current holdings") here
-        # via fetch_polymarket_positions.run(wallets) into
-        # trader_positions_snapshots. Removed 2026-08-13 -- that data was
-        # never actually read by the site (nothing in site/lib/queries.ts
-        # queries trader_positions_snapshots), and the endpoint has no
-        # 90-day window or bot-position cap, so it was fetching a wallet's
-        # entire position history every run regardless -- one wallet alone
-        # hit 10,494 positions after dedup, capped only by a hardcoded
-        # 300-page/150,000-row safety net. Pure wasted runtime for unused
-        # data. trader_positions_snapshots itself is left alone in Supabase
-        # (old data, harmless, just stops growing) rather than dropped.
-        # Wallet list = this run's Polymarket leaderboard, UNION any wallet a
-        # site user follows. Without the follows union, a trader who falls
-        # off Polymarket's own top-100 monthly leaderboard stops getting
-        # fresh activity/scores forever, even if a Sirtio user is actively
-        # following them -- their page goes stale and, worse, their old
-        # score naturally expires once none of their historical positions
-        # remain inside the 90-day scoring window (see sirtio_score.py's
-        # fetch_position_returns). Bounded growth: this set only grows via
-        # real user follows or genuine new leaderboard entrants, not via
-        # every wallet that has ever transiently ranked (that was rejected
-        # as unbounded -- see project chat, 2026-08-18 retention discussion).
+        # Wallet list, rewritten 2026-08-25 -- was Polymarket's leaderboard
+        # UNION followed wallets; now Polymarket's leaderboard UNION
+        # Sirtio's own top-100-by-score UNION followed wallets. Each piece
+        # does a different job:
+        #   - leaderboard_wallets (Polymarket's current top-100 monthly
+        #     pull): DISCOVERY. A wallet can't be ranked by Sirtio Score
+        #     until it's been scored at least once, and it can't be scored
+        #     until its ledger has been fetched at least once -- this is
+        #     the only source of genuinely new candidates.
+        #   - top_scored_wallets (Sirtio's own top-100 by score, see
+        #     fetch_top_scored_wallets above): RETENTION for traders who
+        #     matter by OUR ranking. Without this, a wallet ranked #2 on
+        #     Sirtio's own leaderboard could go stale forever the moment
+        #     Polymarket's own internal list dropped it, even with zero
+        #     followers -- confirmed live via Flipadelphia (see that
+        #     function's docstring for the full incident).
+        #   - followed_wallets: RETENTION for traders a real user cares
+        #     about, regardless of either ranking.
+        # Still bounded growth, same property as before: leaderboard_wallets
+        # and top_scored_wallets are each capped at ~100 by construction,
+        # and followed_wallets only grows via real user follows -- nowhere
+        # close to "every wallet that has ever transiently ranked" (that
+        # was rejected as unbounded, see the 2026-08-18 retention
+        # discussion).
         leaderboard_wallets = {r["wallet"] for r in leaderboard_rows if r.get("wallet")}
         try:
             conn = get_connection()
             try:
                 followed_wallets = fetch_followed_wallets(conn)
+                top_scored_wallets = fetch_top_scored_wallets(conn, limit=100)
             finally:
                 conn.close()
             print(f"Followed wallets to keep tracking: {len(followed_wallets)}")
+            print(f"Sirtio top-100-by-score wallets to keep tracking: {len(top_scored_wallets)}")
         except Exception as e:
-            print(f"Fetching followed wallets failed: {e} -- continuing with "
+            print(f"Fetching followed/top-scored wallets failed: {e} -- continuing with "
                   f"leaderboard wallets only")
             followed_wallets = set()
-        wallets = list(leaderboard_wallets | followed_wallets)
+            top_scored_wallets = set()
+        wallets = list(leaderboard_wallets | top_scored_wallets | followed_wallets)
 
         try:
             if wallets:
-                print(f"Fetching closed positions for {len(wallets)} leaderboard wallets...")
+                print(f"Fetching closed positions for {len(wallets)} tracked wallets...")
                 closed_rows, bot_wallets = fetch_polymarket_closed_positions.run(wallets)
                 print(f"Polymarket closed positions: {len(closed_rows)} rows across {len(wallets)} wallets")
                 # NOTE: no longer saved to Supabase as of 2026-08-16.
@@ -755,7 +808,7 @@ def run():
             if activity_wallets:
                 watermarks = get_wallet_watermarks(activity_wallets)
                 new_wallet_count = len(activity_wallets) - len(watermarks)
-                print(f"Fetching trade/redeem activity for {len(activity_wallets)} leaderboard wallets "
+                print(f"Fetching trade/redeem activity for {len(activity_wallets)} tracked wallets "
                       f"({len(watermarks)} incremental, {new_wallet_count} full backfill)...")
                 wallet_events, activity_bot_wallets, new_watermarks = fetch_polymarket_activity.run(
                     activity_wallets, watermarks=watermarks

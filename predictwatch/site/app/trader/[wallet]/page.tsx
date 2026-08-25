@@ -402,7 +402,7 @@ export default async function TraderPage({
           )}
         </div>
 
-        {positions.length > 0 && (() => {
+        {stats.is_tracked && positions.length > 0 && (() => {
           const sorted = [...positions].sort((a, b) => (b.realized_pnl ?? 0) - (a.realized_pnl ?? 0));
           const topWins = sorted.filter((p) => (p.realized_pnl ?? 0) > 0).slice(0, 5);
           const topLosses = sorted.filter((p) => (p.realized_pnl ?? 0) < 0).slice(-5).reverse();
@@ -454,7 +454,30 @@ export default async function TraderPage({
           <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mb-6">
             All Positions (Last 90 Days)
           </h2>
-          {positions.length === 0 ? (
+          {/*
+            is_tracked === false, added 2026-08-25: this wallet is outside
+            Sirtio's own top-100-by-score AND has no followers, so the
+            pipeline's activity fetch (see run_pipeline.py) has stopped
+            pulling new trade/redeem events for it -- the position ledger
+            below would silently be frozen as of whatever day it fell out,
+            not actually current, even though it renders identically to a
+            live table. Showing an explanation and a path to fix it (follow
+            the wallet) beats rendering a table that LOOKS live but isn't --
+            confirmed live via Flipadelphia: his ledger froze exactly the
+            day he fell off Polymarket's OWN top-100, the prior tracking
+            criterion, and the site kept showing his last-known positions
+            with no indication anything had stopped updating.
+          */}
+          {!stats.is_tracked ? (
+            <p className="text-sm text-body max-w-2xl">
+              This trader isn't in Sirtio's top 100 by score and has no
+              followers, so we've paused fetching new position data for
+              them -- the numbers above reflect their last tracked
+              activity, not necessarily their current trading. Follow
+              this trader (see the button near their name above) to
+              resume tracking their live positions.
+            </p>
+          ) : positions.length === 0 ? (
             <p className="text-sm text-body">No positions resolved in the last 90 days for this wallet.</p>
           ) : (
             <div className="bg-surface border border-accent/40 rounded-lg px-4 sm:px-6 pt-2">
