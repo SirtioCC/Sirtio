@@ -244,6 +244,83 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
   }));
 }
 
+export type ScoreTierCutoffs = {
+  elite: number;
+  great: number;
+  good: number;
+  breakEven: number;
+  belowAverage: number;
+};
+
+/**
+ * Percentile-based tier cutoffs, replacing the fixed z_score
+ * thresholds set 2026-08-14 against the first real run's output (67
+ * wallets) -- Elite >= 6, Great >= 3, Good >= 1, Break even >= -1,
+ * Below average >= -3, else Poor. Those fixed cutoffs stopped meaning
+ * "the elite few" as the tracked pool grew: sirtio_score_population_stats'
+ * sigma2 tightened ~7x as more wallets and resolved positions came in
+ * (63,788 at n=67 down to 9,290 at n=128, confirmed directly against
+ * production 2026-08-25), so the same underlying skill level now
+ * mechanically produces a larger z_score than it did under the old
+ * calibration. Result: 38 of 128 wallets (30%) were reading "Elite" --
+ * nowhere near a small, exclusive tier, and it would only have kept
+ * drifting further as the pool kept growing.
+ *
+ * Computed live off the CURRENT population's z_score distribution
+ * every call (wrapped in cache() so one page render only pays for
+ * this once even if multiple components on the same page need tiers)
+ * -- self-corrects automatically as the pool grows or sigma2 shifts
+ * again, no more manually re-tuning a hardcoded threshold every few
+ * weeks. Bands: Elite = top 5%, Great = next 15% (top 20% cumulative),
+ * Good = next 30% (top 50%), Break even = next 30% (top 80%), Below
+ * average = next 15% (top 95%), Poor = bottom 5%. Mirrors the
+ * original six-tier structure and keeps "Break even" centered near
+ * the middle of the pool, same as intended before, just re-anchored
+ * to percentiles instead of an absolute z_score value that goes stale.
+ *
+ * Returns null if there's no scored population yet (fresh database)
+ * or the query fails -- callers should treat that the same as a null
+ * z_score: no tier badge shown, not a crash. Same defensive pattern
+ * as getLastRefresh below.
+ */
+export const getScoreTierCutoffs = cache(async (): Promise<ScoreTierCutoffs | null> => {
+  try {
+    const rows = await sql<{
+      elite: number | null;
+      great: number | null;
+      good: number | null;
+      break_even: number | null;
+      below_average: number | null;
+    }[]>`
+      WITH latest_scores AS (
+        SELECT DISTINCT ON (wallet) z_score
+        FROM trader_sirtio_scores
+        ORDER BY wallet, computed_at DESC
+      )
+      SELECT
+        PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY z_score) AS elite,
+        PERCENTILE_CONT(0.80) WITHIN GROUP (ORDER BY z_score) AS great,
+        PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY z_score) AS good,
+        PERCENTILE_CONT(0.20) WITHIN GROUP (ORDER BY z_score) AS break_even,
+        PERCENTILE_CONT(0.05) WITHIN GROUP (ORDER BY z_score) AS below_average
+      FROM latest_scores
+      WHERE z_score IS NOT NULL
+    `;
+    const r = rows[0];
+    if (!r || r.elite === null) return null;
+    return {
+      elite: Number(r.elite),
+      great: Number(r.great),
+      good: Number(r.good),
+      breakEven: Number(r.break_even),
+      belowAverage: Number(r.below_average),
+    };
+  } catch (e) {
+    console.error("getScoreTierCutoffs failed, degrading to no tiers shown:", e);
+    return null;
+  }
+});
+
 export async function getHeroStats(): Promise<HeroStats> {
   // total_positions sums each wallet's position_count from their most
   // recent trader_sirtio_scores row (one row per wallet, latest

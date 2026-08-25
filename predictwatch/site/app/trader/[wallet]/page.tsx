@@ -2,7 +2,7 @@ import Link from "next/link";
 import Nav from "@/components/Nav";
 import CopyableWallet from "@/components/CopyableWallet";
 import FollowButton from "@/components/FollowButton";
-import { getTraderStats, getTraderPositions, resolveWallet, type TraderPosition } from "@/lib/queries";
+import { getTraderStats, getTraderPositions, getScoreTierCutoffs, resolveWallet, type TraderPosition, type ScoreTierCutoffs } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 // Was force-dynamic (fresh Supabase query on every single request) --
 // switched to a 5-minute revalidation window 2026-08-16 after this
@@ -18,18 +18,20 @@ import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 // Supabase every time. See leaderboard/page.tsx for the same change.
 export const revalidate = 300;
 
-// Same tier system as the leaderboard (see leaderboard/page.tsx for the
-// full z_score-vs-score rationale) -- duplicated here rather than shared
-// since there's no existing shared utils module for it. Trader detail
-// pages never surfaced tier before; this is genuinely new information,
-// not just decoration.
-function scoreTier(zScore: number | null): string | null {
-  if (zScore === null) return null;
-  if (zScore >= 6) return "Elite";
-  if (zScore >= 3) return "Great";
-  if (zScore >= 1) return "Good";
-  if (zScore >= -1) return "Break even";
-  if (zScore >= -3) return "Below average";
+// Same tier system as the leaderboard (see leaderboard/page.tsx and
+// getScoreTierCutoffs in lib/queries.ts for the full rationale) --
+// duplicated here rather than shared since there's no existing shared
+// utils module for it. Rewritten 2026-08-25 to take live percentile
+// cutoffs instead of fixed z_score thresholds, same change as the
+// leaderboard page -- a trader's tier badge here has to match what
+// they'd see for themselves on the leaderboard.
+function scoreTier(zScore: number | null, cutoffs: ScoreTierCutoffs | null): string | null {
+  if (zScore === null || cutoffs === null) return null;
+  if (zScore >= cutoffs.elite) return "Elite";
+  if (zScore >= cutoffs.great) return "Great";
+  if (zScore >= cutoffs.good) return "Good";
+  if (zScore >= cutoffs.breakEven) return "Break even";
+  if (zScore >= cutoffs.belowAverage) return "Below average";
   return "Poor";
 }
 
@@ -51,10 +53,10 @@ function traderSummary(stats: {
   avg_edge_pct: number | null;
   z_score: number | null;
   rank: number | null;
-}, name: string): string {
+}, name: string, cutoffs: ScoreTierCutoffs | null): string {
   const { position_count, avg_edge_pct, z_score, rank } = stats;
 
-  if (position_count === 0 || z_score === null) {
+  if (position_count === 0 || z_score === null || cutoffs === null) {
     return `${name} doesn't have enough resolved positions in the ` +
       `last 90 days yet for Sirtio to compute a reliable skill estimate.`;
   }
@@ -66,15 +68,15 @@ function traderSummary(stats: {
   const rankText = rank !== null ? ` and currently sits at rank #${rank} on Sirtio's leaderboard` : "";
 
   let verdict: string;
-  if (z_score >= 6) {
+  if (z_score >= cutoffs.elite) {
     verdict = `ranks among the most skilled Polymarket traders we track`;
-  } else if (z_score >= 3) {
+  } else if (z_score >= cutoffs.great) {
     verdict = `has consistently outperformed the average tracked trader`;
-  } else if (z_score >= 1) {
+  } else if (z_score >= cutoffs.good) {
     verdict = `shows a real edge over the average tracked trader, though a more moderate one`;
-  } else if (z_score >= -1) {
+  } else if (z_score >= cutoffs.breakEven) {
     verdict = `performs about in line with the average tracked trader`;
-  } else if (z_score >= -3) {
+  } else if (z_score >= cutoffs.belowAverage) {
     verdict = `has underperformed the average tracked trader over this window`;
   } else {
     verdict = `has clearly underperformed the rest of the tracked pool`;
@@ -174,8 +176,11 @@ export default async function TraderPage({
     );
   }
 
-  const stats = await getTraderStats(wallet);
-  const positions = await getTraderPositions(wallet);
+  const [stats, positions, tierCutoffs] = await Promise.all([
+    getTraderStats(wallet),
+    getTraderPositions(wallet),
+    getScoreTierCutoffs(),
+  ]);
 
   const noData =
     !stats ||
@@ -237,8 +242,8 @@ export default async function TraderPage({
         ...(stats.realized_pnl_90d !== null
           ? [{ "@type": "PropertyValue", name: "Realized PnL (90d, USD)", value: stats.realized_pnl_90d.toFixed(0) }]
           : []),
-        ...(scoreTier(stats.z_score)
-          ? [{ "@type": "PropertyValue", name: "Sirtio Tier", value: scoreTier(stats.z_score) }]
+        ...(scoreTier(stats.z_score, tierCutoffs)
+          ? [{ "@type": "PropertyValue", name: "Sirtio Tier", value: scoreTier(stats.z_score, tierCutoffs) }]
           : []),
       ],
     },
@@ -273,20 +278,20 @@ export default async function TraderPage({
             </div>
           </div>
 
-          {scoreTier(stats.z_score) && (
+          {scoreTier(stats.z_score, tierCutoffs) && (
             <div className="bg-surface-raised border border-accent/40 rounded-lg px-6 py-3 text-center">
               <p className="font-mono text-xs uppercase tracking-wide text-muted mb-1">
                 Tier
               </p>
               <p className="font-[family-name:var(--font-title)] font-bold text-2xl text-accent">
-                {scoreTier(stats.z_score)}
+                {scoreTier(stats.z_score, tierCutoffs)}
               </p>
             </div>
           )}
         </div>
 
         <p className="mt-6 text-sm text-body leading-relaxed max-w-3xl">
-          {traderSummary(stats, name)}
+          {traderSummary(stats, name, tierCutoffs)}
         </p>
 
         <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
