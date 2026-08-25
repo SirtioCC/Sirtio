@@ -157,7 +157,33 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
   // on Polymarket's current list at all. wallet is a deterministic
   // tiebreaker for wallets with no score yet (NULLS LAST) or identical
   // scores.
-  const rows = await sql<Omit<LeaderboardTrader, "prev_rank">[]>`
+  // prev_rank, rewritten 2026-08-25: previously read from
+  // trader_daily_ranks, a table the pipeline only ever wrote a row into
+  // for wallets that were part of THAT run's Polymarket top-100 pull
+  // (confirmed live against production: trader_daily_ranks' latest
+  // snapshot_date is a 100% exact-match subset of
+  // trader_leaderboard_snapshots' freshest fetch -- zero wallets in one
+  // but not the other). That meant any wallet ranked here via
+  // all_wallets but NOT currently on Polymarket's own list -- e.g.
+  // Flipadelphia, currently #2 by Sirtio Score -- could never get a
+  // prev_rank and permanently showed "NEW," even after being tracked
+  // and scored for weeks. ~90+ of the ~215 wallets Sirtio has ever
+  // scored were affected the same way, not just this one wallet.
+  //
+  // Rebuilt to rank ALL discovered wallets by their trader_sirtio_scores
+  // history -- same source and same ROW_NUMBER pattern as `rank` above
+  // -- just reconstructed as of a past point in time instead of now, so
+  // prev_rank and rank are always apples-to-apples. previous_score_time
+  // keeps the old 6-hour-gap heuristic (skips past same-day/manual
+  // reruns, lands on a distinctly prior run). A wallet with no score row
+  // at or before that time -- a genuinely new wallet, not just one
+  // absent from Polymarket's current list -- is excluded from
+  // previous_ranked entirely, so it still correctly shows "NEW"; that
+  // part of the original behavior is preserved, just scoped to the
+  // right condition now. No more separate try/catch query either --
+  // trader_sirtio_scores is core to every other function in this file
+  // and always exists, unlike trader_daily_ranks.
+  const rows = await sql<LeaderboardTrader[]>`
     WITH all_wallets AS (
       SELECT DISTINCT ON (wallet) *
       FROM trader_leaderboard_snapshots
@@ -181,52 +207,40 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
         s.sirtio_score AS pm_score
       FROM all_wallets w
       LEFT JOIN latest_scores s ON s.wallet = w.wallet
+    ),
+    latest_score_time AS (
+      SELECT MAX(computed_at) AS t FROM trader_sirtio_scores
+    ),
+    previous_score_time AS (
+      SELECT MAX(computed_at) AS t FROM trader_sirtio_scores
+      WHERE computed_at < (SELECT t FROM latest_score_time) - INTERVAL '6 hours'
+    ),
+    previous_scores AS (
+      SELECT DISTINCT ON (wallet) *
+      FROM trader_sirtio_scores
+      WHERE computed_at <= (SELECT t FROM previous_score_time)
+      ORDER BY wallet, computed_at DESC
+    ),
+    previous_ranked AS (
+      SELECT
+        wallet,
+        ROW_NUMBER() OVER (ORDER BY sirtio_score DESC NULLS LAST, wallet ASC) AS prev_rank
+      FROM previous_scores
+      WHERE sirtio_score IS NOT NULL
     )
-    SELECT * FROM ranked
-    ORDER BY rank ASC
+    SELECT r.*, p.prev_rank
+    FROM ranked r
+    LEFT JOIN previous_ranked p ON p.wallet = r.wallet
+    ORDER BY r.rank ASC
     LIMIT ${limit}
   `;
-
-  // Yesterday's rank for the leaderboard-mover arrows, read from
-  // trader_daily_ranks -- a dedicated once-a-day-per-wallet snapshot
-  // table written by the pipeline right after Sirtio Scores are saved
-  // each run. trader_leaderboard_snapshots can't serve this: it's
-  // upserted in place (one row per wallet, overwritten every run) to
-  // keep storage bounded, so no prior day's rank survives there for a
-  // wallet still active today.
-  //
-  // Deliberately a SEPARATE query, wrapped in its own try/catch, rather
-  // than one more CTE joined into the query above: trader_daily_ranks is
-  // only created by the pipeline's schema step, so the table may not
-  // exist yet in a given database the first time this code runs against
-  // it (confirmed live via a Vercel build failure: 42P01 undefined_table,
-  // which -- since /leaderboard is statically prerendered -- crashed the
-  // ENTIRE page build, not just this feature). Isolating it here means a
-  // missing table degrades to "NEW" for every trader (same as a genuine
-  // first day with no history) instead of taking the whole leaderboard
-  // down.
-  let prevRanks = new Map<string, number>();
-  try {
-    const prevRows = await sql<{ wallet: string; prev_rank: number }[]>`
-      WITH previous_rank_date AS (
-        SELECT MAX(snapshot_date) AS d FROM trader_daily_ranks
-        WHERE snapshot_date < CURRENT_DATE
-      )
-      SELECT wallet, rank AS prev_rank
-      FROM trader_daily_ranks
-      WHERE snapshot_date = (SELECT d FROM previous_rank_date)
-    `;
-    prevRanks = new Map(prevRows.map((r) => [r.wallet, Number(r.prev_rank)]));
-  } catch (e) {
-    console.error("Failed to load trader_daily_ranks, degrading to NEW for all traders:", e);
-  }
 
   return rows.map((r) => ({
     ...r,
     avg_edge_pct: r.avg_edge_pct !== null ? Number(r.avg_edge_pct) : null,
     z_score: r.z_score !== null ? Number(r.z_score) : null,
     pm_score: r.pm_score !== null ? Number(r.pm_score) : null,
-    prev_rank: prevRanks.get(r.wallet) ?? null,
+    prev_rank: r.prev_rank !== null ? Number(r.prev_rank) : null,
   }));
 }
 
