@@ -498,6 +498,30 @@ export async function getTraderPositions(wallet: string): Promise<TraderPosition
   `;
 }
 
+/**
+ * Backs the "All Positions" window label on the trader page, added
+ * 2026-08-26. A wallet that Sirtio only started tracking recently has
+ * NOT had a full 90-day window fetched, even though getTraderPositions
+ * filters on closed_at >= NOW() - 90 days -- a real position that
+ * resolved before Sirtio started watching this wallet (e.g. an old
+ * settled bet) will never appear, no matter how the closed_at filter
+ * is written, because the ledger row for it was never fetched at all.
+ * Labeling the table "Last 90 Days" in that case overstates coverage.
+ *
+ * Returns the earliest fetched_at Sirtio has EVER recorded for this
+ * wallet's realized-PnL ledger, with NO closed_at filter -- this is
+ * about when WE started watching the wallet, not which positions are
+ * shown in the 90-day table above it.
+ */
+export async function getPositionsTrackingStart(wallet: string): Promise<string | null> {
+  const rows = await sql<{ tracking_started_at: string | null }[]>`
+    SELECT MIN(fetched_at) AS tracking_started_at
+    FROM trader_realized_pnl_events
+    WHERE wallet = ${wallet}
+  `;
+  return rows.length > 0 ? rows[0].tracking_started_at : null;
+}
+
 export const resolveWallet = cache(async (input: string): Promise<string | null> => {
   const trimmed = input.trim();
   if (/^0x[a-fA-F0-9]{10,}$/.test(trimmed)) {

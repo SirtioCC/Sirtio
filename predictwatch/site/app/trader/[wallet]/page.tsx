@@ -2,7 +2,7 @@ import Link from "next/link";
 import Nav from "@/components/Nav";
 import CopyableWallet from "@/components/CopyableWallet";
 import FollowButton from "@/components/FollowButton";
-import { getTraderStats, getTraderPositions, getScoreTierCutoffs, resolveWallet, type TraderPosition, type ScoreTierCutoffs } from "@/lib/queries";
+import { getTraderStats, getTraderPositions, getPositionsTrackingStart, getScoreTierCutoffs, resolveWallet, type TraderPosition, type ScoreTierCutoffs } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 // Was force-dynamic (fresh Supabase query on every single request) --
 // switched to a 5-minute revalidation window 2026-08-16 after this
@@ -33,6 +33,24 @@ function scoreTier(zScore: number | null, cutoffs: ScoreTierCutoffs | null): str
   if (zScore >= cutoffs.breakEven) return "Break even";
   if (zScore >= cutoffs.belowAverage) return "Below average";
   return "Poor";
+}
+
+// Honest window label for the "All Positions" table, added 2026-08-26.
+// A wallet Sirtio started tracking less than 90 days ago has not had
+// a full 90-day window fetched -- a position that resolved before
+// tracking began is missing from the table no matter what, so calling
+// it "Last 90 Days" overstates coverage. Falls back to "Last 90 Days"
+// when trackingStartedAt is null (no ledger rows yet at all) since
+// the empty-state message below the table already covers that case.
+function positionsWindowLabel(trackingStartedAt: string | null): string {
+  if (!trackingStartedAt) return "Last 90 Days";
+  const start = new Date(trackingStartedAt);
+  const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  if (start > ninetyDaysAgo) {
+    const dateText = start.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    return `Since Tracked (${dateText})`;
+  }
+  return "Last 90 Days";
 }
 
 function formatMoney(v: number | null) {
@@ -176,10 +194,11 @@ export default async function TraderPage({
     );
   }
 
-  const [stats, positions, tierCutoffs] = await Promise.all([
+  const [stats, positions, tierCutoffs, trackingStartedAt] = await Promise.all([
     getTraderStats(wallet),
     getTraderPositions(wallet),
     getScoreTierCutoffs(),
+    getPositionsTrackingStart(wallet),
   ]);
 
   const noData =
@@ -452,7 +471,7 @@ export default async function TraderPage({
 
         <div className="mt-16">
           <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mb-6">
-            All Positions (Last 90 Days)
+            All Positions ({positionsWindowLabel(trackingStartedAt)})
           </h2>
           {/*
             is_tracked === false, added 2026-08-25: this wallet is outside
