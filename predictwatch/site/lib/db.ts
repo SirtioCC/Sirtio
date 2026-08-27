@@ -21,17 +21,18 @@ if (!process.env.DATABASE_URL) {
 // with Supabase's Transaction-mode pooler, which can hand different
 // statements on that same "connection" to different backend Postgres
 // processes -- exactly what produced the wedged connections below. The
-// trader page alone fires 4 concurrent queries via Promise.all
-// (getTraderStats/getTraderPositions/getScoreTierCutoffs/
-// getPositionsTrackingStart) plus a 5th from Nav's DataFreshness
-// (getLastRefresh, an independent async Server Component) -- 5 queries
-// against the old max: 3 guaranteed at least 2 of them pipelined on
-// every single trader page render, which is exactly why it was always
-// the same query (getPositionsTrackingStart) that wedged. 10 covers
-// that peak per-request concurrency with headroom for a couple of
-// concurrent visitors before pipelining kicks in again; Supabase's
-// pooler comfortably supports far more client connections than this on
-// any tier.
+// trader page alone fired 4 concurrent queries via Promise.all at the
+// time (getTraderStats/getTraderPositions/getScoreTierCutoffs/
+// getPositionsTrackingStart -- getScoreTierCutoffs was later removed
+// entirely, see lib/tiers.ts, dropping this to 3) plus a 4th-then/3rd-now
+// from Nav's DataFreshness (getLastRefresh, an independent async Server
+// Component) -- 5 queries against the old max: 3 guaranteed at least 2
+// of them pipelined on every single trader page render, which is
+// exactly why it was always the same query (getPositionsTrackingStart)
+// that wedged. 10 covers that peak per-request concurrency with
+// headroom for a couple of concurrent visitors before pipelining kicks
+// in again; Supabase's pooler comfortably supports far more client
+// connections than this on any tier.
 //
 // prepare: false is required against Supabase's Transaction pooler --
 // PgBouncer in transaction mode hands out a different backend connection

@@ -1,8 +1,9 @@
 import Link from "next/link";
 import Nav from "@/components/Nav";
 import CopyableWallet from "@/components/CopyableWallet";
-import { getLeaderboard, getScoreTierCutoffs, type ScoreTierCutoffs } from "@/lib/queries";
+import { getLeaderboard } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
+import { scoreTier } from "@/lib/tiers";
 // Was force-dynamic (fresh Supabase query on every single request) --
 // switched to a 5-minute revalidation window 2026-08-16 after this
 // hit Supabase's free-tier egress cap (115% of 5GB in one billing
@@ -25,30 +26,11 @@ export const metadata = {
 // methodology's formula section. Sample-size damping only ever pulls
 // a score DOWN from there, never up, so these bands are read directly
 // against the final (already-damped) score shown on the page.
-// Tier cutoffs anchored to z_score, not the raw 0-100 score -- Z is
-// the real statistic (skill above/below average in posterior-
-// uncertainty units); the 0-100 number is just a display transform of
-// it via a logistic k that gets re-calibrated from real data every
-// pipeline run.
-//
-// Rewritten 2026-08-25 to take live percentile cutoffs (see
-// getScoreTierCutoffs in lib/queries.ts) instead of the fixed
-// thresholds set 2026-08-14 against the first real run's output (67
-// wallets) -- those stopped meaning "the elite few" as the pool grew
-// and the population's variance tightened, inflating Elite to 30% of
-// all tracked wallets. Percentile bands self-correct automatically as
-// the pool grows or the population's variance shifts again, no more
-// manual re-tuning. cutoffs === null (fresh/empty database, or the
-// query failed) degrades to no tier shown, same as a null zScore.
-function scoreTier(zScore: number | null, cutoffs: ScoreTierCutoffs | null): string | null {
-  if (zScore === null || cutoffs === null) return null;
-  if (zScore >= cutoffs.elite) return "Elite";
-  if (zScore >= cutoffs.great) return "Great";
-  if (zScore >= cutoffs.good) return "Good";
-  if (zScore >= cutoffs.breakEven) return "Break even";
-  if (zScore >= cutoffs.belowAverage) return "Below average";
-  return "Poor";
-}
+// scoreTier() (fixed cutoffs on the 0-100 score) now lives in
+// lib/tiers.ts, shared with the trader page -- see that file for why
+// tiers moved off both the old fixed z_score thresholds (2026-08-14)
+// and the percentile-of-z_score cutoffs that replaced them
+// (2026-08-25).
 
 // Rank-mover badge: compares a trader's position in today's list
 // (their index in scoredTraders, 1-based) against prev_rank (their
@@ -75,13 +57,7 @@ function RankMove({ currentRank, prevRank }: { currentRank: number; prevRank: nu
 }
 
 export default async function LeaderboardPage() {
-  // Fetched together -- getScoreTierCutoffs is wrapped in cache() so
-  // this and any other component that needs tiers on the same render
-  // (e.g. a trader detail page) only pay for the percentile query once.
-  const [traders, tierCutoffs] = await Promise.all([
-    getLeaderboard(100),
-    getScoreTierCutoffs(),
-  ]);
+  const traders = await getLeaderboard(100);
   const scoredTraders = traders.filter(
     (t) => t.pm_score !== null || t.position_count > 0
   );
@@ -167,9 +143,9 @@ export default async function LeaderboardPage() {
                   <span className="font-mono text-xl text-accent">
                     {t.pm_score !== null ? t.pm_score.toFixed(1) : "--"}
                   </span>
-                  {scoreTier(t.z_score, tierCutoffs) && (
+                  {scoreTier(t.pm_score) && (
                     <p className="text-xs text-muted mt-0.5">
-                      {scoreTier(t.z_score, tierCutoffs)}
+                      {scoreTier(t.pm_score)}
                     </p>
                   )}
                 </div>

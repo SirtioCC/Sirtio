@@ -46,6 +46,26 @@ MIN_POSITION_COST_BASIS = 25.0
 # cost basis position read as an 8,642% return) that shouldn't be
 # allowed to dominate the pooled statistics on its own.
 MAX_ABS_PCT_RETURN = 1000.0
+# Same class of problem as the two guards above, one level up the
+# pipeline: compute_scores' per-trader sigma_i2 (n_i >= 5 branch) used
+# to floor at 1.0 -- fine when a trader's own returns have real spread,
+# but REDEEM events (added 2026-08-26) settle an abandoned losing
+# position at exactly -100%, so a wallet with many redeemed losses has
+# nearly ALL its returns clustered within a rounding error of -100%.
+# Sample variance on a near-degenerate cluster like that collapses
+# toward zero, and omega_i = 1/sqrt(n_i/sigma_i2 + 1/tau2) collapses
+# with it -- confirmed live 2026-08-27: one 57-position wallet hit
+# z = -755 this way, a statistically meaningless magnitude for a
+# Bayesian t-statistic. Worse, k (compute_scores' logistic steepness)
+# is auto-calibrated off std_z across the WHOLE population, so a
+# handful of these degenerate wallets silently crushed k -- and with
+# it, the displayed sirtio_score -- for every other trader too (the
+# top-ranked wallet site-wide was reading 61.1 instead of a defensible
+# ~95 purely because of this). 100.0 (a 10-percentage-point SD floor)
+# is conservative relative to the population's own ~76pt spread but
+# large enough that a near-identical run of redeemed losses can no
+# longer read as near-infinite confidence.
+MIN_TRADER_VARIANCE = 100.0
 
 
 def fetch_position_returns(conn):
@@ -160,7 +180,7 @@ def compute_scores(wallet_returns: dict, wallet_pnl: dict, mu, sigma2, tau2, k=N
 
         if n_i >= 5:
             sigma_i2 = sum((r - r_bar) ** 2 for r in returns) / (n_i - 1)
-            sigma_i2 = max(sigma_i2, 1.0)
+            sigma_i2 = max(sigma_i2, MIN_TRADER_VARIANCE)
         else:
             sigma_i2 = sigma2  # too little personal data to trust their own variance
 
