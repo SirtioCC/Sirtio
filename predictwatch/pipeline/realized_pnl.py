@@ -98,7 +98,14 @@ def fetch_resolution_by_condition_ids(condition_ids: list[str]) -> dict:
     result = {}
     for i in range(0, len(unique_ids), CONDITION_ID_BATCH_SIZE):
         batch = unique_ids[i:i + CONDITION_ID_BATCH_SIZE]
-        params = {"condition_ids": ",".join(batch), "limit": len(batch)}
+        # closed=true is REQUIRED here -- confirmed live 2026-08-26 that
+        # querying by condition_ids alone returns an empty array for a
+        # market that has already resolved (verified against a known
+        # closed MLB market: same request without closed=true returned
+        # [], with it returned the full market object). Without this,
+        # every resolution lookup silently finds nothing for exactly
+        # the closed markets it exists to look up.
+        params = {"condition_ids": ",".join(batch), "closed": "true", "limit": len(batch)}
         try:
             resp = requests.get(GAMMA_MARKETS_URL, params=params, timeout=30)
             resp.raise_for_status()
@@ -301,7 +308,7 @@ def _apply_merge(wallet: str, positions: dict, e: dict) -> list[dict]:
 
 
 def build_realized_pnl_events(wallet: str, events: list[dict], initial_positions: dict = None,
-                               outcome_token_ids: dict = None):
+                               outcome_token_ids: dict = None, resolution_lookup: dict = None):
     """
     Walk one wallet's chronological TRADE_BUY / TRADE_SELL / REDEEM /
     SPLIT / MERGE events and emit a realized-PnL row for every SELL,
@@ -331,6 +338,15 @@ def build_realized_pnl_events(wallet: str, events: list[dict], initial_positions
     calling build_realized_pnl_events, same pattern as the existing
     force-close step -- keeps this function itself free of network
     calls.
+
+    resolution_lookup: optional dict, condition_id -> {"resolved": bool,
+    "outcome_prices": [float, ...]}, pre-fetched via
+    fetch_resolution_by_condition_ids for any condition_id that appears
+    in a REDEEM event -- REQUIRED to get a correct settle_price for
+    REDEEM events, since Polymarket's /activity endpoint does not carry
+    a meaningful price for them (confirmed live 2026-08-26: both price
+    and usdcSize are 0 regardless of win or loss). Fetch this BEFORE
+    calling build_realized_pnl_events, same pattern as outcome_token_ids.
     """
     positions = {k: dict(v) for k, v in initial_positions.items()} if initial_positions else {}
     realized = []
@@ -380,12 +396,43 @@ def build_realized_pnl_events(wallet: str, events: list[dict], initial_positions
                 continue
             sell_size = min(size, pos["tokens"])
             avg_cost = pos["cost"] / pos["tokens"]
-            # REDEEM events settle winning tokens at $1/token; if
-            # Polymarket's own event includes a price, trust it, else
-            # default to 1.0 (a REDEEM only ever happens for tokens
-            # that resolved as the winning outcome -- losing tokens
-            # have nothing to redeem).
-            settle_price = price if (event_type == "TRADE_SELL" or price) else 1.0
+
+            if event_type == "TRADE_SELL":
+                settle_price = price
+            else:
+                # REDEEM: Polymarket's /activity endpoint does NOT carry
+                # a meaningful price for REDEEM events -- confirmed live
+                # 2026-08-26 against a real wallet that both `price` and
+                # `usdcSize` are 0 on a REDEEM regardless of whether the
+                # underlying position actually won or lost (verified
+                # directly: a Blue Jays moneyline REDEEM came back with
+                # price=0, usdcSize=0, and Gamma's own outcomePrices for
+                # that market confirmed Blue Jays genuinely lost --
+                # outcomePrices=["1","0"], outcomeIndex=1). The old code
+                # treated any REDEEM as "won, settle at $1" -- simply
+                # wrong; REDEEM fires for losing tokens too.
+                #
+                # Real settlement comes from the market's actual
+                # resolution -- Gamma API's outcomePrices, keyed by this
+                # position's outcome_index -- pre-fetched into
+                # resolution_lookup before this function runs (see
+                # run(), same pattern already used for
+                # force_close_abandoned_positions).
+                res = (resolution_lookup or {}).get(pos["condition_id"])
+                outcome_index = pos.get("outcome_index")
+                if (res and res.get("resolved") and res.get("outcome_prices")
+                        and outcome_index is not None
+                        and outcome_index < len(res["outcome_prices"])):
+                    settle_price = res["outcome_prices"][outcome_index]
+                else:
+                    # Resolution genuinely unknown (Gamma lookup failed,
+                    # or this condition_id wasn't in the pre-fetch). Do
+                    # NOT guess -- skip realizing this event, leaving
+                    # the position open so a later pass can close it
+                    # correctly once resolution data is available,
+                    # rather than risk crediting a loss as a win.
+                    continue
+
             realized_pnl = (settle_price - avg_cost) * sell_size
             tx_hash = e.get("transaction_hash")
             if not tx_hash:
@@ -512,8 +559,20 @@ def run(wallet_events: dict, resolve_abandoned: bool = True, initial_open_positi
         needs_lookup = split_condition_ids - already_tracked_cids
         outcome_token_ids = fetch_outcome_token_ids(list(needs_lookup)) if needs_lookup else {}
 
+        # Pre-fetch real market resolution for every condition_id that
+        # appears in a REDEEM event -- REQUIRED to get a correct
+        # settle_price, since Polymarket's /activity endpoint doesn't
+        # carry a meaningful price for REDEEM (see build_realized_pnl_events
+        # docstring). Every REDEEM needs this (unlike SPLIT's token-id
+        # lookup, there's no "already tracked" shortcut -- resolution
+        # isn't something the ledger can already know).
+        redeem_condition_ids = {e["condition_id"] for e in events if e["event_type"] == "REDEEM"}
+        resolution_lookup = (fetch_resolution_by_condition_ids(list(redeem_condition_ids))
+                             if redeem_condition_ids else {})
+
         realized, open_positions = build_realized_pnl_events(
-            wallet, events, initial_positions=wallet_initial, outcome_token_ids=outcome_token_ids
+            wallet, events, initial_positions=wallet_initial, outcome_token_ids=outcome_token_ids,
+            resolution_lookup=resolution_lookup
         )
         if resolve_abandoned and open_positions:
             force_closed = force_close_abandoned_positions(wallet, open_positions)
