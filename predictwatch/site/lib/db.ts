@@ -13,6 +13,12 @@ if (!process.env.DATABASE_URL) {
 // A couple of connections is plenty for a low-traffic site talking to
 // Supabase's pooler; keeps this safe to import in multiple route files
 // without exhausting the pool.
-const sql = postgres(process.env.DATABASE_URL, { max: 3 });
+//
+// prepare: false is required against Supabase's Transaction pooler --
+// PgBouncer in transaction mode hands out a different backend connection
+// per transaction, so a prepared statement created on one backend can be
+// gone by the time postgres.js re-executes it, surfacing as
+// 'prepared statement "..." does not exist' at runtime.
+const sql = postgres(process.env.DATABASE_URL, { max: 3, prepare: false });
 
 export default sql;
