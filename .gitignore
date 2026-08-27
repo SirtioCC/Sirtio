@@ -1,0 +1,3 @@
+# Local Claude Code config (e.g. dev-server launch profiles for the
+# Browser pane) -- machine-specific, not something the repo needs to track.
+.claude/
