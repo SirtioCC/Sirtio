@@ -527,6 +527,7 @@ export const getLastRefresh = cache(async (): Promise<string | null> => {
 export type RecentSettlement = {
   wallet: string;
   username: string | null;
+  rank: number | null;
   market_title: string | null;
   realized_pnl: number;
   closed_at: string;
@@ -554,6 +555,16 @@ const MIN_TICKER_COST_BASIS = 25;
  * to correct for. Recency instead reads as "the platform is actually
  * live," which is the whole point of filling this space.
  *
+ * rank, added 2026-08-28: same computation as getLeaderboard/
+ * getTraderStats -- ROW_NUMBER() over EVERY discovered wallet's latest
+ * Sirtio Score (NULLS LAST), not just Polymarket's current top-100
+ * pull. Reuses that exact pattern rather than a second one so a rank
+ * shown here always matches what that same wallet's own trader page
+ * and the main leaderboard show -- three independently-computed ranks
+ * for the same wallet would be worse than any one of them being absent.
+ * A wallet with no score yet (or one outside the ranked set entirely)
+ * comes back with rank NULL, same as elsewhere on the site.
+ *
  * Wrapped in try/catch like getLastRefresh above -- this is decorative
  * homepage chrome, not core content, so a query failure should degrade
  * to "don't render the ticker," never take the page down with it.
@@ -576,14 +587,26 @@ export async function getRecentSettlements(limit = 24): Promise<RecentSettlement
         HAVING SUM(avg_cost * size) >= ${MIN_TICKER_COST_BASIS}
           AND SUM(realized_pnl) != 0
       ),
-      latest_username AS (
+      all_wallets AS (
         SELECT DISTINCT ON (wallet) wallet, username
         FROM trader_leaderboard_snapshots
         ORDER BY wallet, fetched_at DESC
+      ),
+      latest_scores AS (
+        SELECT DISTINCT ON (wallet) wallet, sirtio_score
+        FROM trader_sirtio_scores
+        ORDER BY wallet, computed_at DESC
+      ),
+      ranked AS (
+        SELECT
+          w.wallet, w.username,
+          ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, w.wallet ASC) AS rank
+        FROM all_wallets w
+        LEFT JOIN latest_scores s ON s.wallet = w.wallet
       )
-      SELECT p.wallet, u.username, p.market_title, p.realized_pnl, p.closed_at
+      SELECT p.wallet, r.username, r.rank, p.market_title, p.realized_pnl, p.closed_at
       FROM per_position p
-      LEFT JOIN latest_username u ON u.wallet = p.wallet
+      LEFT JOIN ranked r ON r.wallet = p.wallet
       ORDER BY p.closed_at DESC
       LIMIT ${limit}
     `;
