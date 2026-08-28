@@ -523,3 +523,73 @@ export const getLastRefresh = cache(async (): Promise<string | null> => {
     return null;
   }
 });
+
+export type RecentSettlement = {
+  wallet: string;
+  username: string | null;
+  market_title: string | null;
+  realized_pnl: number;
+  closed_at: string;
+};
+
+// Cost-basis floor matching sirtio_score.py's MIN_POSITION_COST_BASIS --
+// same reasoning: a few-dollar position can show a huge percent swing
+// on a tiny real amount, which reads as noise here rather than the
+// "real trading activity" signal this ticker exists to show.
+const MIN_TICKER_COST_BASIS = 25;
+
+/**
+ * Backs the homepage margin ticker (added 2026-08-28). Real settled
+ * positions across ALL tracked wallets, most recent first -- same
+ * per-position aggregation as getTraderPositions (a partial sell
+ * followed by a full exit is one position, not two ledger rows), just
+ * without the wallet filter. 14-day window is generous headroom over
+ * the daily pipeline cadence; confirmed live this comfortably clears
+ * thousands of qualifying positions, so LIMIT is what actually bounds
+ * this, not the window running dry.
+ *
+ * Deliberately ordered by recency, not by |realized_pnl| DESC -- a
+ * "biggest wins" ticker would just repeat whichever few wallets trade
+ * biggest, reproducing the same skew this site's Sirtio Score exists
+ * to correct for. Recency instead reads as "the platform is actually
+ * live," which is the whole point of filling this space.
+ *
+ * Wrapped in try/catch like getLastRefresh above -- this is decorative
+ * homepage chrome, not core content, so a query failure should degrade
+ * to "don't render the ticker," never take the page down with it.
+ */
+export async function getRecentSettlements(limit = 24): Promise<RecentSettlement[]> {
+  try {
+    const rows = await sql<(Omit<RecentSettlement, "realized_pnl"> & { realized_pnl: number | string })[]>`
+      WITH per_position AS (
+        SELECT
+          wallet,
+          condition_id,
+          MAX(market_title) AS market_title,
+          SUM(realized_pnl) AS realized_pnl,
+          SUM(avg_cost * size) AS position_cost_basis,
+          MAX(closed_at) AS closed_at
+        FROM trader_realized_pnl_events
+        WHERE closed_at IS NOT NULL
+          AND closed_at >= (NOW() - INTERVAL '14 days')
+        GROUP BY wallet, condition_id
+        HAVING SUM(avg_cost * size) >= ${MIN_TICKER_COST_BASIS}
+          AND SUM(realized_pnl) != 0
+      ),
+      latest_username AS (
+        SELECT DISTINCT ON (wallet) wallet, username
+        FROM trader_leaderboard_snapshots
+        ORDER BY wallet, fetched_at DESC
+      )
+      SELECT p.wallet, u.username, p.market_title, p.realized_pnl, p.closed_at
+      FROM per_position p
+      LEFT JOIN latest_username u ON u.wallet = p.wallet
+      ORDER BY p.closed_at DESC
+      LIMIT ${limit}
+    `;
+    return rows.map((r) => ({ ...r, realized_pnl: Number(r.realized_pnl) }));
+  } catch (e) {
+    console.error("getRecentSettlements failed, degrading gracefully:", e);
+    return [];
+  }
+}
