@@ -297,7 +297,7 @@ export default async function TraderPage({
           )}
         </div>
 
-        <p className="mt-6 text-sm text-body leading-relaxed max-w-3xl">
+        <p className="mt-6 text-sm text-parchment leading-relaxed max-w-3xl">
           {traderSummary(stats, name)}
         </p>
 
@@ -343,7 +343,7 @@ export default async function TraderPage({
         </div>
 
         {stats.open_fraction !== null && stats.open_fraction > 0.4 && (
-          <p className="mt-4 text-sm text-muted max-w-3xl">
+          <p className="mt-4 text-sm text-parchment max-w-3xl">
             Heads up: an estimated {(stats.open_fraction * 100).toFixed(0)}% of this
             trader&apos;s deployed capital is still sitting in open, unresolved
             positions. The Avg edge and Sirtio Score above are based only on
@@ -356,7 +356,7 @@ export default async function TraderPage({
           <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mb-6">
             Sirtio Score Breakdown
           </h2>
-          <p className="text-xs text-muted mb-6">
+          <p className="text-xs text-parchment mb-6">
             See the <Link href="/methodology" className="text-accent hover:underline">full methodology</Link> for how each piece is calculated.
           </p>
 
@@ -405,7 +405,7 @@ export default async function TraderPage({
                 </p>
               </div>
               {detailText && (
-                <p className="text-sm text-body leading-relaxed max-w-2xl">
+                <p className="text-sm text-parchment leading-relaxed max-w-2xl">
                   {detailText}
                 </p>
               )}
