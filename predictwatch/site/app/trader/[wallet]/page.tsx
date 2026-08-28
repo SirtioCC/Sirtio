@@ -301,7 +301,7 @@ export default async function TraderPage({
           {traderSummary(stats, name)}
         </p>
 
-        <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
+        <div className="mt-8 grid grid-cols-1 sm:grid-cols-4 gap-4 max-w-4xl">
           <div className="bg-surface-raised border border-accent/40 rounded-lg p-5 flex items-start gap-10">
             <div className="text-center">
               <p className="font-mono text-xs uppercase tracking-wide text-muted">
@@ -340,7 +340,35 @@ export default async function TraderPage({
               {stats.position_count}
             </p>
           </div>
+          <div className="bg-surface-raised border border-accent/40 rounded-lg p-5">
+            <p className="text-xs uppercase tracking-wide text-muted mb-2">
+              PnL <span className="lowercase text-muted/70">(Polymarket, monthly)</span>
+            </p>
+            <p className={`font-[family-name:var(--font-display)] text-3xl ${
+                stats.polymarket_pnl === null ? "text-muted"
+                : stats.polymarket_pnl >= 0 ? "text-signal-yes" : "text-signal-no"
+              }`}
+            >
+              {stats.polymarket_pnl !== null ? formatMoney(stats.polymarket_pnl) : "--"}
+            </p>
+            <p className="text-xs text-muted mt-1">
+              {stats.polymarket_pnl !== null
+                ? "As reported by Polymarket's own leaderboard"
+                : "Not on Polymarket's current monthly leaderboard"}
+            </p>
+          </div>
         </div>
+
+        {stats.open_fraction !== null && stats.open_fraction > 0.4 && (
+          <p className="mt-4 text-xs text-muted max-w-3xl">
+            Heads up: an estimated {(stats.open_fraction * 100).toFixed(0)}% of this
+            trader&apos;s deployed capital is still sitting in open, unresolved
+            positions. The Avg edge and Sirtio Score above are based only on
+            positions that have actually closed -- they don&apos;t reflect that
+            remaining open book, which is part of why they can look different
+            from PnL figures you see elsewhere for this trader.
+          </p>
+        )}
 
         <div className="mt-10">
           <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mb-6">
