@@ -540,7 +540,8 @@ export type RecentSettlement = {
 const MIN_TICKER_COST_BASIS = 25;
 
 /**
- * Backs the homepage margin ticker (added 2026-08-28). Real settled
+ * Backs MarginTicker.tsx (added 2026-08-28, now used on both the
+ * homepage and the leaderboard page). Real settled
  * positions across ALL tracked wallets, most recent first -- same
  * per-position aggregation as getTraderPositions (a partial sell
  * followed by a full exit is one position, not two ledger rows), just

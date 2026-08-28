@@ -8,14 +8,18 @@ function formatMoney(v: number): string {
 }
 
 /**
- * One margin column of the homepage ticker. Only ever rendered at very
- * wide viewports (see the [@media(min-width:1850px)] gate below) --
- * below that width there's no real margin for this to live in, so it
- * doesn't render at all rather than overlapping the hero content.
+ * One margin column of the ticker. Only ever rendered at very wide
+ * viewports (see the [@media(min-width:1850px)] gate below) -- below
+ * that width there's no real margin for this to live in, so it
+ * doesn't render at all rather than overlapping the page's content.
  *
- * Fixed-position, not absolute: this page is roughly one viewport
- * tall, so pinning to the viewport (rather than the page) is simplest
- * and avoids the column running out of page to anchor against.
+ * Fixed-position, not absolute: pinning to the viewport (rather than
+ * the page) keeps it visible the whole time regardless of how tall
+ * the page actually is -- on the homepage that's mostly moot (the
+ * hero is roughly one viewport tall anyway), but on the leaderboard's
+ * long scrolling table, fixed is what keeps this feeling like an
+ * ambient, always-present ticker instead of vanishing after the first
+ * screenful.
  *
  * items is pre-doubled by the caller for a seamless scroll loop (the
  * translateY(-50%) keyframe in globals.css assumes exactly two copies
@@ -89,9 +93,9 @@ function TickerColumn({
 }
 
 /**
- * Fills the homepage hero's side margins (only visible past ~1850px,
- * where those margins actually exist) with real, recently-settled
- * positions across every tracked wallet -- decorative in placement,
+ * Fills a page's side margins (only visible past ~1850px, where those
+ * margins actually exist) with real, recently-settled positions
+ * across every tracked wallet -- decorative in placement,
  * but not decorative in content: every row links to the real trader
  * page for whoever made that trade. See getRecentSettlements for why
  * this is ordered by recency rather than biggest wins.
@@ -107,7 +111,7 @@ function TickerColumn({
  * without this, a keyboard or screen-reader user would tab through 48
  * duplicate links before ever reaching the page's actual content.
  */
-export default async function HeroTicker() {
+export default async function MarginTicker() {
   const settlements = await getRecentSettlements(24);
   if (settlements.length < 6) return null;
 
