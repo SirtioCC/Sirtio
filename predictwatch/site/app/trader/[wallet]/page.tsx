@@ -343,7 +343,7 @@ export default async function TraderPage({
         </div>
 
         {stats.open_fraction !== null && stats.open_fraction > 0.4 && (
-          <p className="mt-4 text-xs text-muted max-w-3xl">
+          <p className="mt-4 text-sm text-muted max-w-3xl">
             Heads up: an estimated {(stats.open_fraction * 100).toFixed(0)}% of this
             trader&apos;s deployed capital is still sitting in open, unresolved
             positions. The Avg edge and Sirtio Score above are based only on
