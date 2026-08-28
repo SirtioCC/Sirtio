@@ -1,6 +1,7 @@
 import Link from "next/link";
 import Nav from "@/components/Nav";
 import CopyableWallet from "@/components/CopyableWallet";
+import MarginTicker from "@/components/MarginTicker";
 import { getLeaderboard } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 import { scoreTier } from "@/lib/tiers";
@@ -65,6 +66,7 @@ export default async function LeaderboardPage() {
   return (
     <div className="min-h-screen">
       <Nav />
+      <MarginTicker />
       <section className="max-w-6xl mx-auto px-6 py-16">
         <h1 className="font-[family-name:var(--font-title)] font-bold text-4xl text-parchment mb-2">
           Trader Leaderboard
