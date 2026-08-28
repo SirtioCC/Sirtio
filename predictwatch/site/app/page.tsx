@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Nav from "@/components/Nav";
+import HeroTicker from "@/components/HeroTicker";
 import { getLeaderboard, getHeroStats } from "@/lib/queries";
 import { getDisplayName } from "@/lib/format";
 // Was force-dynamic (fresh Supabase query on every single request) --
@@ -20,6 +21,7 @@ export default async function Home() {
   return (
     <div className="min-h-screen">
       <Nav />
+      <HeroTicker />
 
       <section className="max-w-6xl mx-auto px-6 pt-20 pb-16">
         <div className="grid lg:grid-cols-[1fr_320px] gap-12 items-start">

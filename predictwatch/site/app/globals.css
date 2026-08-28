@@ -43,3 +43,12 @@ body {
   color: var(--parchment);
   font-family: var(--font-body), system-ui, sans-serif;
 }
+
+/* Homepage margin ticker (HeroTicker.tsx) -- a named keyframes block
+   so the component can reach it via Tailwind's arbitrary animate-[...]
+   syntax without a separate JS animation library for a one-property
+   scroll loop. */
+@keyframes ticker-scroll {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
