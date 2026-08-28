@@ -286,14 +286,17 @@ export default async function TraderPage({
           </div>
 
           {scoreTier(stats.pm_score) && (
-            <div className="bg-surface-raised border border-accent/40 rounded-lg px-6 py-3 text-center">
+            <Link href="/methodology#tiers"
+              className="bg-surface-raised border border-accent/40 hover:border-accent transition-colors rounded-lg px-6 py-3 text-center"
+              title="See how tiers work on the Methodology page"
+            >
               <p className="font-mono text-xs uppercase tracking-wide text-muted mb-1">
                 Tier
               </p>
               <p className="font-[family-name:var(--font-title)] font-bold text-2xl text-accent">
                 {scoreTier(stats.pm_score)}
               </p>
-            </div>
+            </Link>
           )}
         </div>
 
