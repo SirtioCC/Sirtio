@@ -137,6 +137,23 @@ CREATE TABLE IF NOT EXISTS trader_sirtio_scores (
     shrunk_edge_pct DOUBLE PRECISION,
     z_score DOUBLE PRECISION,
     realized_pnl_90d DOUBLE PRECISION,
+    -- open_cost_basis/open_fraction, added 2026-08-28: realized_pnl_90d/
+    -- avg_edge_pct above are built ENTIRELY from CLOSED positions (see
+    -- sirtio_score.py's fetch_position_returns) -- for an active wallet
+    -- that keeps most of its capital continuously deployed, that can be
+    -- a small, self-selected slice of its real exposure. open_cost_basis
+    -- is that same wallet's still-open (unresolved) cost basis from
+    -- wallet_open_ledger; open_fraction = open / (open + closed). Found
+    -- live 2026-08-28 investigating why our realized_pnl_90d for the
+    -- #1-ranked wallet didn't match Polymarket's own leaderboard pnl for
+    -- the same wallet (~13x gap, not explained by window length alone):
+    -- that wallet had $2.54M of open cost basis against $1.74M of
+    -- realized gain, and 108 of 138 then-scored wallets (78%) had OVER
+    -- HALF their real capital sitting in positions the score never sees.
+    -- Transparency data only -- NOT fed into avg_edge_pct/z_score/
+    -- sirtio_score (see fetch_open_cost_basis's docstring for why not).
+    open_cost_basis DOUBLE PRECISION,
+    open_fraction DOUBLE PRECISION,
     sirtio_score DOUBLE PRECISION,
     computed_at TIMESTAMPTZ NOT NULL,
     leaderboard_snapshot_at TIMESTAMPTZ
@@ -676,9 +693,11 @@ def save_sirtio_scores(results: list, pop_stats: dict, leaderboard_snapshot_at: 
                 """
                 INSERT INTO trader_sirtio_scores
                 (wallet, position_count, avg_edge_pct, shrunk_edge_pct,
-                 z_score, realized_pnl_90d, sirtio_score, computed_at, leaderboard_snapshot_at)
+                 z_score, realized_pnl_90d, open_cost_basis, open_fraction,
+                 sirtio_score, computed_at, leaderboard_snapshot_at)
                 VALUES (%(wallet)s, %(position_count)s, %(avg_edge_pct)s,
                         %(shrunk_edge_pct)s, %(z_score)s, %(realized_pnl_90d)s,
+                        %(open_cost_basis)s, %(open_fraction)s,
                         %(sirtio_score)s, %(computed_at)s, %(leaderboard_snapshot_at)s)
                 """,
                 rows,

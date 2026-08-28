@@ -275,6 +275,25 @@ export type TraderDetail = {
   rank: number | null;
   volume: number | null;
   realized_pnl_90d: number | null;
+  // polymarket_pnl, added 2026-08-28: Polymarket's OWN reported PnL for
+  // this wallet (their MONTH-window leaderboard `pnl` field), straight
+  // from trader_leaderboard_snapshots -- NOT derived from our own
+  // realized-PnL ledger. This is the number that will actually match
+  // what a user sees on the wallet's own Polymarket profile; our
+  // realized_pnl_90d is a different, deliberately more complete
+  // (closed-only, 90-day, split/merge/early-exit-inclusive) figure built
+  // for scoring, not guaranteed to reconcile with Polymarket's own UI --
+  // see sirtio_score.py's fetch_open_cost_basis docstring for the full
+  // investigation into why they diverge. Null for a wallet outside
+  // Polymarket's current top-100 monthly pull (no recent snapshot to
+  // read it from).
+  polymarket_pnl: number | null;
+  // open_fraction, added 2026-08-28: share of this wallet's total
+  // (open + closed) cost basis that's still sitting in unresolved open
+  // positions -- see trader_sirtio_scores.open_fraction / sirtio_score.py
+  // for the full reasoning. A high value means avg_edge_pct/pm_score
+  // below are based on a minority of this trader's real book.
+  open_fraction: number | null;
   position_count: number;
   avg_edge_pct: number | null;
   z_score: number | null;
@@ -353,6 +372,8 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
       r.rank,
       w.volume,
       COALESCE(s.realized_pnl_90d, 0) AS realized_pnl_90d,
+      w.pnl AS polymarket_pnl,
+      s.open_fraction,
       COALESCE(s.position_count, 0) AS position_count,
       s.avg_edge_pct,
       s.z_score,
@@ -373,6 +394,8 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
     avg_edge_pct: r.avg_edge_pct !== null ? Number(r.avg_edge_pct) : null,
     z_score: r.z_score !== null ? Number(r.z_score) : null,
     pm_score: r.pm_score !== null ? Number(r.pm_score) : null,
+    polymarket_pnl: r.polymarket_pnl !== null ? Number(r.polymarket_pnl) : null,
+    open_fraction: r.open_fraction !== null ? Number(r.open_fraction) : null,
     is_tracked: Boolean(r.is_tracked),
   };
 });

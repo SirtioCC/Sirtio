@@ -68,6 +68,67 @@ MAX_ABS_PCT_RETURN = 1000.0
 MIN_TRADER_VARIANCE = 100.0
 
 
+def fetch_open_cost_basis(conn):
+    """
+    Total OPEN (never sold/redeemed/merged, unresolved) cost basis per
+    wallet, from wallet_open_ledger -- purely local/DB-side, no network
+    calls, so this is cheap even though wallet_open_ledger holds tens
+    of thousands of open positions across all tracked wallets combined.
+
+    THIS EXISTS BECAUSE realized_pnl_90d/avg_edge_pct are built
+    ENTIRELY from CLOSED positions (see fetch_position_returns) -- for
+    an active high-frequency wallet that keeps most of its capital
+    continuously deployed, that can be a small, self-selected slice of
+    its real exposure. Confirmed live 2026-08-28: comparing our
+    computed realized_pnl_90d for the #1-ranked wallet against
+    Polymarket's OWN leaderboard pnl for the same wallet in the same
+    trader_leaderboard_snapshots table showed a ~13x gap ($1.74M vs
+    $136,830) that persisted even narrowed to a trailing 30-day window
+    ($1.54M vs $136,830) -- ruling out a simple window-length
+    explanation. Investigation found no duplicate-row or unit-scaling
+    bug in the ledger (individual trade rows check out arithmetically,
+    and the unique index on (wallet, asset, transaction_hash) is
+    correctly enforced); instead, that one wallet had 745 open
+    positions worth $2.54M in still-open cost basis sitting in
+    wallet_open_ledger, MORE than its entire realized gain -- and
+    checking the rest of the scored population, this is the norm, not
+    an outlier: 108 of 138 currently-scored wallets (78%) have OVER
+    HALF their real deployed capital sitting in positions the score
+    never sees at all, in either direction. A wallet that closes
+    winners quickly (this platform's most common profitable pattern --
+    buy at a discount, exit near $0.999 right before resolution) while
+    simply carrying more open risk than closed track record will look
+    far more skilled by realized-only metrics than its actual current
+    portfolio state supports.
+
+    This does NOT feed into avg_edge_pct/z_score/sirtio_score --
+    mark-to-market on an open, still-resolving book is exactly the kind
+    of noisy signal this file already goes out of its way to keep out
+    of the population statistics (see MIN_POSITION_COST_BASIS,
+    MAX_ABS_PCT_RETURN, MIN_TRADER_VARIANCE above), and pricing all
+    ~25,000 distinct currently-open markets across the tracked wallet
+    pool live on every run would be a real, unbounded runtime/rate-limit
+    cost this pipeline has already been burned by once (see the
+    incremental-fetching comment in fetch_polymarket_activity.py).
+    Returned instead as a transparency figure alongside the score, so
+    the site can disclose how much of a wallet's real book the score
+    is (and isn't) actually based on, and so a PnL number sourced
+    directly from Polymarket's own leaderboard -- guaranteed to
+    reconcile with what a user sees on Polymarket itself, unlike our
+    realized-only figure -- can be shown instead of this one wherever
+    the site needs a headline PnL dollar amount.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT wallet, positions_json FROM wallet_open_ledger")
+        rows = cur.fetchall()
+
+    open_cost_basis = {}
+    for wallet, positions_json in rows:
+        total = sum(float(p.get("cost") or 0.0) for p in positions_json.values())
+        open_cost_basis[wallet] = total
+    return open_cost_basis
+
+
 def fetch_position_returns(conn):
     """
     Aggregate the full 90-day realized-PnL ledger to one row per
@@ -88,9 +149,15 @@ def fetch_position_returns(conn):
     with excluded dust positions; the site's own "All Positions" list
     is a separate, unfiltered query and still shows every position.
 
-    Returns (wallet_returns, wallet_pnl):
-      wallet_returns: wallet -> list of per-position percent returns
-      wallet_pnl:     wallet -> total realized PnL dollars (90d)
+    Returns (wallet_returns, wallet_pnl, wallet_closed_cost):
+      wallet_returns:     wallet -> list of per-position percent returns
+      wallet_pnl:         wallet -> total realized PnL dollars (90d)
+      wallet_closed_cost: wallet -> total CLOSED cost basis dollars
+                          (90d, every position regardless of size --
+                          same "full ledger" reasoning as wallet_pnl).
+                          Paired with fetch_open_cost_basis's still-OPEN
+                          figure to get open_fraction in compute_scores;
+                          not used in the score math itself.
     """
     with conn.cursor() as cur:
         cur.execute("""
@@ -104,16 +171,17 @@ def fetch_position_returns(conn):
         """)
         rows = cur.fetchall()
 
-    wallet_returns, wallet_pnl = {}, {}
+    wallet_returns, wallet_pnl, wallet_closed_cost = {}, {}, {}
     for wallet, _condition_id, pnl, cost_basis in rows:
         pnl = float(pnl) if pnl is not None else 0.0
         cost_basis = float(cost_basis) if cost_basis is not None else 0.0
         wallet_pnl[wallet] = wallet_pnl.get(wallet, 0.0) + pnl
+        wallet_closed_cost[wallet] = wallet_closed_cost.get(wallet, 0.0) + cost_basis
         if cost_basis >= MIN_POSITION_COST_BASIS:
             pct_return = (pnl / cost_basis) * 100
             if abs(pct_return) <= MAX_ABS_PCT_RETURN:
                 wallet_returns.setdefault(wallet, []).append(pct_return)
-    return wallet_returns, wallet_pnl
+    return wallet_returns, wallet_pnl, wallet_closed_cost
 
 
 def compute_population_stats(wallet_returns: dict):
@@ -162,7 +230,8 @@ def compute_population_stats(wallet_returns: dict):
     return mu, sigma2, tau2
 
 
-def compute_scores(wallet_returns: dict, wallet_pnl: dict, mu, sigma2, tau2, k=None):
+def compute_scores(wallet_returns: dict, wallet_pnl: dict, mu, sigma2, tau2, k=None,
+                    open_cost_basis: dict | None = None, wallet_closed_cost: dict | None = None):
     """
     Per-wallet: shrunk edge (theta_i), posterior uncertainty (omega_i),
     Z-score (theta_i / omega_i), and the final 0-100 Sirtio Score via a
@@ -172,6 +241,12 @@ def compute_scores(wallet_returns: dict, wallet_pnl: dict, mu, sigma2, tau2, k=N
     REAL spread of Z across this pool, so scores don't all bunch near
     50 or blow out to 0/100 -- solved so two standard deviations of Z
     lands near a score of ~95.
+
+    open_cost_basis: optional wallet -> still-open cost basis (from
+    fetch_open_cost_basis), attached to each result as open_cost_basis
+    and open_fraction = open / (open + closed). Pure transparency data,
+    not used anywhere in the score math itself -- see
+    fetch_open_cost_basis's docstring for why.
     """
     results = []
     for wallet, returns in wallet_returns.items():
@@ -197,6 +272,11 @@ def compute_scores(wallet_returns: dict, wallet_pnl: dict, mu, sigma2, tau2, k=N
         omega_i = math.sqrt(omega2) if omega2 > 0 else 1e-9
         z_i = theta_i / omega_i
 
+        open_cost = (open_cost_basis or {}).get(wallet, 0.0)
+        closed_cost = (wallet_closed_cost or {}).get(wallet, 0.0)
+        total_cost = open_cost + closed_cost
+        open_fraction = (open_cost / total_cost) if total_cost > 0 else None
+
         results.append({
             "wallet": wallet,
             "position_count": n_i,
@@ -204,6 +284,8 @@ def compute_scores(wallet_returns: dict, wallet_pnl: dict, mu, sigma2, tau2, k=N
             "shrunk_edge_pct": theta_i,
             "z_score": z_i,
             "realized_pnl_90d": wallet_pnl.get(wallet, 0.0),
+            "open_cost_basis": open_cost,
+            "open_fraction": open_fraction,
         })
 
     if k is None:
@@ -229,9 +311,11 @@ def run(conn):
     and stored every run for visibility into how mu/sigma2/tau2/k
     drift over time as the wallet pool and their track records change.
     """
-    wallet_returns, wallet_pnl = fetch_position_returns(conn)
+    wallet_returns, wallet_pnl, wallet_closed_cost = fetch_position_returns(conn)
+    open_cost_basis = fetch_open_cost_basis(conn)
     mu, sigma2, tau2 = compute_population_stats(wallet_returns)
-    results, k = compute_scores(wallet_returns, wallet_pnl, mu, sigma2, tau2)
+    results, k = compute_scores(wallet_returns, wallet_pnl, mu, sigma2, tau2,
+                                 open_cost_basis=open_cost_basis, wallet_closed_cost=wallet_closed_cost)
     return results, {
         "mu": mu, "sigma2": sigma2, "tau2": tau2, "k": k,
         "n_wallets": len(results),
