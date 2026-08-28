@@ -372,33 +372,33 @@ export default async function TraderPage({
               <div className="bg-surface-raised border border-accent/40 rounded-lg px-6 py-6">
                 <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-1">
                   <div className="flex-1 text-center">
-                    <p className="text-xs uppercase tracking-wide text-muted mb-1">Raw avg return</p>
+                    <p className="text-xs uppercase tracking-wide text-parchment mb-1">Raw avg return</p>
                     <p className="font-mono text-2xl text-parchment">{edgeText}</p>
-                    <p className="text-xs text-muted mt-1">across {stats.position_count} position{stats.position_count === 1 ? "" : "s"}</p>
+                    <p className="text-xs text-parchment mt-1">across {stats.position_count} position{stats.position_count === 1 ? "" : "s"}</p>
                   </div>
                   <div className="flex flex-col items-center justify-center px-2 max-w-[130px]">
                     <span className="text-accent text-xl leading-none">&rarr;</span>
-                    <span className="text-[10px] text-muted text-center mt-1 leading-tight">
+                    <span className="text-[10px] text-parchment text-center mt-1 leading-tight">
                       Shrunk toward the pool average, weighted by sample size
                     </span>
                   </div>
                   <div className="flex-1 text-center">
-                    <p className="text-xs uppercase tracking-wide text-muted mb-1">Z-score</p>
+                    <p className="text-xs uppercase tracking-wide text-parchment mb-1">Z-score</p>
                     <p className="font-mono text-2xl text-parchment">{zText}</p>
-                    <p className="text-xs text-muted mt-1">distance from average, adjusted for confidence</p>
+                    <p className="text-xs text-parchment mt-1">distance from average, adjusted for confidence</p>
                   </div>
                   <div className="flex flex-col items-center justify-center px-2 max-w-[130px]">
                     <span className="text-accent text-xl leading-none">&rarr;</span>
-                    <span className="text-[10px] text-muted text-center mt-1 leading-tight">
+                    <span className="text-[10px] text-parchment text-center mt-1 leading-tight">
                       Converted to a 0-100 scale
                     </span>
                   </div>
                   <div className="flex-1 text-center">
-                    <p className="text-xs uppercase tracking-wide text-muted mb-1">Sirtio score</p>
+                    <p className="text-xs uppercase tracking-wide text-parchment mb-1">Sirtio score</p>
                     <p className="font-mono text-2xl text-accent">{scoreText}</p>
                   </div>
                 </div>
-                <p className="text-xs text-muted mt-5 text-center">
+                <p className="text-xs text-parchment mt-5 text-center">
                   The exact weighting is part of the model we keep private (see{" "}
                   <Link href="/methodology" className="text-accent hover:underline">methodology</Link>),
                   but every number above is this trader's real, calculated value at that step.
