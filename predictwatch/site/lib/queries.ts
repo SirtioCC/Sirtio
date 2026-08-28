@@ -365,6 +365,23 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
       FROM all_wallets w
       LEFT JOIN latest_scores s ON s.wallet = w.wallet
       WHERE s.sirtio_score IS NOT NULL
+    ),
+    -- polymarket_pnl gate, added 2026-08-28 (fixing a bug from the same
+    -- day): all_wallets above is "the last row we ever saw for this
+    -- wallet," with NO age limit -- fine for username/rank display
+    -- (last-known is still useful), but wrong for a PnL figure held up
+    -- as current. Confirmed live: theowalcott's stored w.pnl was 9 days
+    -- stale (fetched 2026-08-19, wallet fell off Polymarket's own
+    -- current top-100 monthly pull sometime after that and never got
+    -- refetched) -- displayed with no age indicator, so it just looked
+    -- like a wrong number instead of an old one. latest_fetch is the
+    -- most recent fetch across ALL wallets (whatever that timestamp
+    -- happens to be -- this pipeline's schedule trigger has its own
+    -- known reliability gaps, so "today" isn't a safe assumption); a
+    -- wallet's own row counts as current only if it's within 1 day of
+    -- that, i.e. it was actually present in the latest pull.
+    latest_fetch AS (
+      SELECT MAX(fetched_at) AS t FROM trader_leaderboard_snapshots
     )
     SELECT
       w.wallet,
@@ -372,7 +389,8 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
       r.rank,
       w.volume,
       COALESCE(s.realized_pnl_90d, 0) AS realized_pnl_90d,
-      w.pnl AS polymarket_pnl,
+      CASE WHEN w.fetched_at >= (SELECT t FROM latest_fetch) - INTERVAL '1 day'
+        THEN w.pnl ELSE NULL END AS polymarket_pnl,
       s.open_fraction,
       COALESCE(s.position_count, 0) AS position_count,
       s.avg_edge_pct,
