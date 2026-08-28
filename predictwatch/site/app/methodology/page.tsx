@@ -1,5 +1,28 @@
 import Link from "next/link";
 import Nav from "@/components/Nav";
+import { SCORE_TIER_CUTOFFS } from "@/lib/tiers";
+
+// Tier rows for the methodology page's Tiers table, derived from
+// SCORE_TIER_CUTOFFS (lib/tiers.ts) rather than a second hardcoded copy
+// of the cutoffs -- if those numbers ever change, this table updates
+// with them instead of silently drifting out of sync. Descriptions
+// reuse the same wording as each tier's verdict text on the trader page
+// (see traderSummary() in app/trader/[wallet]/page.tsx) so the site
+// describes each tier the same way everywhere it appears.
+const TIER_ROWS = [
+  { name: "Elite", min: SCORE_TIER_CUTOFFS.elite, max: 100,
+    description: "Ranks among the most skilled traders we track." },
+  { name: "Great", min: SCORE_TIER_CUTOFFS.great, max: SCORE_TIER_CUTOFFS.elite - 1,
+    description: "Has consistently outperformed the average tracked trader." },
+  { name: "Good", min: SCORE_TIER_CUTOFFS.good, max: SCORE_TIER_CUTOFFS.great - 1,
+    description: "Shows a real edge over the average tracked trader, though a more moderate one." },
+  { name: "Break even", min: SCORE_TIER_CUTOFFS.breakEven, max: SCORE_TIER_CUTOFFS.good - 1,
+    description: "Performs about in line with the average tracked trader. 50 is exact break-even." },
+  { name: "Below average", min: SCORE_TIER_CUTOFFS.belowAverage, max: SCORE_TIER_CUTOFFS.breakEven - 1,
+    description: "Has underperformed the average tracked trader over the window." },
+  { name: "Poor", min: 0, max: SCORE_TIER_CUTOFFS.belowAverage - 1,
+    description: "Has clearly underperformed the rest of the tracked pool." },
+] as const;
 
 export const metadata = {
   title: "Methodology",
@@ -102,7 +125,7 @@ export default function MethodologyPage() {
           </li>
           <li className="flex gap-3">
             <span className="text-accent mt-1">-</span>
-            <span><strong className="text-parchment">50 is break-even.</strong> Above is a real, demonstrated edge; below isn't. Tiers (Elite down to Poor) are fixed points on that scale, not a guaranteed top-5%-gets-a-trophy ranking -- Elite can sit empty if nobody's earned it yet.</span>
+            <span><strong className="text-parchment">50 is break-even.</strong> Above is a real, demonstrated edge; below isn't. <Link href="#tiers" className="text-accent hover:underline">Tiers</Link> (Elite down to Poor) are fixed points on that scale, not a guaranteed top-5%-gets-a-trophy ranking -- Elite can sit empty if nobody's earned it yet.</span>
           </li>
           <li className="flex gap-3">
             <span className="text-accent mt-1">-</span>
@@ -126,6 +149,32 @@ export default function MethodologyPage() {
           constants private; what's above is the real shape of it, not
           a simplified stand-in.
         </p>
+
+        <h2 id="tiers" className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6 scroll-mt-24">
+          Tiers
+        </h2>
+        <p className="text-sm text-body leading-relaxed mb-6">
+          Every trader with a computed Sirtio Score lands in one of six
+          tiers, fixed at points along the 0-100 scale -- not a forced
+          top-5%-gets-a-trophy ranking. A tier can sit empty if nobody in
+          the current pool has actually earned it, or hold most of the
+          pool if that's genuinely where performance clusters.
+        </p>
+        <div className="space-y-2">
+          {TIER_ROWS.map((tier) => (
+            <div key={tier.name}
+              className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 bg-surface-raised border border-accent/40 rounded-lg px-5 py-3"
+            >
+              <span className="font-[family-name:var(--font-title)] font-bold text-accent w-36 shrink-0">
+                {tier.name}
+              </span>
+              <span className="font-mono text-xs text-muted w-16 shrink-0">
+                {tier.min}-{tier.max}
+              </span>
+              <span className="text-sm text-body">{tier.description}</span>
+            </div>
+          ))}
+        </div>
 
         <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
           Recent Changes
