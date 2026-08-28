@@ -373,7 +373,7 @@ export default async function TraderPage({
                 <div className="flex flex-col sm:flex-row items-center gap-3 sm:gap-1">
                   <div className="flex-1 text-center">
                     <p className="text-xs uppercase tracking-wide text-parchment mb-1">Raw avg return</p>
-                    <p className="font-mono text-2xl text-parchment">{edgeText}</p>
+                    <p className="font-mono text-2xl text-accent">{edgeText}</p>
                     <p className="text-xs text-parchment mt-1">across {stats.position_count} position{stats.position_count === 1 ? "" : "s"}</p>
                   </div>
                   <div className="flex flex-col items-center justify-center px-2 max-w-[130px]">
@@ -384,7 +384,7 @@ export default async function TraderPage({
                   </div>
                   <div className="flex-1 text-center">
                     <p className="text-xs uppercase tracking-wide text-parchment mb-1">Z-score</p>
-                    <p className="font-mono text-2xl text-parchment">{zText}</p>
+                    <p className="font-mono text-2xl text-accent">{zText}</p>
                     <p className="text-xs text-parchment mt-1">distance from average, adjusted for confidence</p>
                   </div>
                   <div className="flex flex-col items-center justify-center px-2 max-w-[130px]">
