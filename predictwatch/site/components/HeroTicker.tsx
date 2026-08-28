@@ -61,8 +61,13 @@ function TickerColumn({
               className="group block px-2 -mx-2 py-[11px] border-b border-hairline rounded-[5px] hover:bg-accent/[0.06] transition-colors"
             >
               <div className="flex items-baseline justify-between gap-2">
-                <span className="font-medium text-[11.5px] text-parchment truncate max-w-[150px] border-b border-accent/45 group-hover:text-accent group-hover:border-accent">
-                  {getDisplayName(s.username, s.wallet)}
+                <span className="flex items-baseline gap-1.5 min-w-0">
+                  {s.rank !== null && (
+                    <span className="font-mono text-[10px] text-accent shrink-0">#{s.rank}</span>
+                  )}
+                  <span className="font-medium text-[11.5px] text-parchment truncate border-b border-accent/45 group-hover:text-accent group-hover:border-accent">
+                    {getDisplayName(s.username, s.wallet)}
+                  </span>
                 </span>
                 <span
                   className={`font-mono text-[11px] shrink-0 tabular-nums ${
