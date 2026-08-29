@@ -316,7 +316,7 @@ export default async function TraderPage({
                 </p>
               ) : (
                 <p className="text-xs text-muted mt-1 max-w-[10rem]">
-                  Not on Polymarket&apos;s current monthly leaderboard
+                  Not yet ranked by Sirtio Score
                 </p>
               )}
             </div>
