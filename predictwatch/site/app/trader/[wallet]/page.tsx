@@ -2,6 +2,7 @@ import Link from "next/link";
 import Nav from "@/components/Nav";
 import CopyableWallet from "@/components/CopyableWallet";
 import FollowButton from "@/components/FollowButton";
+import PositionsList from "@/components/PositionsList";
 import { getTraderStats, getTraderPositions, getPositionsTrackingStart, resolveWallet, type TraderPosition } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 import { scoreTier, SCORE_TIER_CUTOFFS } from "@/lib/tiers";
@@ -500,48 +501,7 @@ export default async function TraderPage({
           ) : positions.length === 0 ? (
             <p className="text-sm text-body">No positions resolved in the last 90 days for this wallet.</p>
           ) : (
-            <div className="bg-surface border border-accent/40 rounded-lg px-4 sm:px-6 pt-2">
-              <div className="grid grid-cols-[1fr_90px_80px] sm:grid-cols-[1fr_80px_90px_100px_90px] gap-3 sm:gap-4 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
-                <span>Market</span>
-                <span className="hidden sm:block text-right">Side</span>
-                <span className="hidden sm:block text-right">Entry</span>
-                <span className="text-right">PnL</span>
-                <span className="text-right">Return</span>
-              </div>
-              {positions.map((p) => {
-                return (
-                  <div key={p.condition_id}
-                    className="grid grid-cols-[1fr_90px_80px] sm:grid-cols-[1fr_80px_90px_100px_90px] items-center gap-3 sm:gap-4 py-3 border-b border-hairline"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm text-parchment truncate">{p.market_title || "--"}</p>
-                      <p className="text-xs text-muted mt-0.5">
-                        {p.closed_at
-                          ? `Resolved ${new Date(p.closed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
-                          : "Resolved"}
-                      </p>
-                    </div>
-                    <span className="hidden sm:block font-mono text-xs text-muted text-right">{p.outcome || "--"}</span>
-                    <span className="hidden sm:block font-mono text-xs text-muted text-right">
-                      {p.avg_price !== null ? `${(p.avg_price * 100).toFixed(0)}c` : "--"}
-                    </span>
-                    <span className={`font-mono text-xs text-right ${
-                        (p.realized_pnl ?? 0) >= 0 ? "text-signal-yes" : "text-signal-no"
-                      }`}
-                    >
-                      {formatMoney(p.realized_pnl)}
-                    </span>
-                    <span className={`font-mono text-xs text-right ${
-                        (p.percent_return_approx ?? 0) >= 0 ? "text-signal-yes" : "text-signal-no"
-                      }`}
-                    >
-                      {p.percent_return_approx !== null ? `${p.percent_return_approx.toFixed(0)}%` : "--"}
-                    </span>
-                  </div>
-                );
-              })}
-              <div className="pb-2" />
-            </div>
+            <PositionsList positions={positions} />
           )}
         </div>
       </section>
