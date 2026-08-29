@@ -65,7 +65,7 @@ export default async function LeaderboardPage() {
 
   return (
     <div className="min-h-screen">
-      <Nav />
+      <Nav showFreshness />
       <MarginTicker />
       <section className="max-w-6xl mx-auto px-6 py-16">
         <h1 className="font-[family-name:var(--font-title)] font-bold text-4xl text-parchment mb-2">

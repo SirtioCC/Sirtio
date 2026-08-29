@@ -259,7 +259,7 @@ export default async function TraderPage({
 
   return (
     <div className="min-h-screen">
-      <Nav />
+      <Nav showFreshness />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(traderJsonLd) }}
