@@ -20,6 +20,16 @@
   --signal-yes: #4fbf8b;
   --signal-no: #e2694b;
   --accent: #e8a33d;
+  /* Ledger event-type colors for the trader page's All Positions
+     filter, added 2026-08-29 -- deliberately separate from
+     --signal-yes/--signal-no, which mean win/loss, a different axis
+     than "what kind of ledger event closed this position." Sold reuses
+     --accent (the one deliberate, manually-timed close); force-closed
+     positions reuse --muted with a dashed marker in the component
+     itself, since that event is synthetic (inferred by realized_pnl.py,
+     not a real on-chain action) rather than getting its own color. */
+  --type-redeemed: #5fb3c9;
+  --type-merged: #a58bdb;
 }
 
 @theme inline {
@@ -33,6 +43,8 @@
   --color-signal-yes: var(--signal-yes);
   --color-signal-no: var(--signal-no);
   --color-accent: var(--accent);
+  --color-type-redeemed: var(--type-redeemed);
+  --color-type-merged: var(--type-merged);
   --font-display: var(--font-display);
   --font-body: var(--font-body);
   --font-mono: var(--font-mono);

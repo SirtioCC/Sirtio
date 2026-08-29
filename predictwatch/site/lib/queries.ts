@@ -299,6 +299,14 @@ export type TraderPosition = {
   percent_return_approx: number | null;
   closed_at: string | null;
   end_date: string | null;
+  // How this position actually closed -- TRADE_SELL / REDEEM / MERGE /
+  // FORCE_CLOSE_RESOLVED (see trader_realized_pnl_events). A position
+  // partially sold then later fully redeemed collapses to one row here
+  // (see per_position below), so this is the event_type of whichever
+  // ledger row has the latest closed_at for that position -- how it
+  // finally finished, not how it started closing. TRADE_BUY/SPLIT never
+  // appear: those open a position, they don't close one.
+  event_type: string | null;
 };
 
 export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail | null> => {
@@ -408,7 +416,13 @@ export async function getTraderPositions(wallet: string): Promise<TraderPosition
         SUM(avg_cost * size) / NULLIF(SUM(size), 0) AS avg_price,
         SUM(realized_pnl) AS realized_pnl,
         SUM(avg_cost * size) AS position_cost_basis,
-        MAX(closed_at) AS closed_at
+        MAX(closed_at) AS closed_at,
+        -- How this position actually finished, not how it started
+        -- closing: ordering the group's event_types by closed_at DESC
+        -- and taking the first picks whichever event zeroed out the
+        -- position last (e.g. a partial sell followed by a redeem of
+        -- the remainder reports as REDEEM, not TRADE_SELL).
+        (ARRAY_AGG(event_type ORDER BY closed_at DESC NULLS LAST))[1] AS event_type
       FROM trader_realized_pnl_events
       WHERE wallet = ${wallet}
         AND closed_at IS NOT NULL
@@ -426,7 +440,8 @@ export async function getTraderPositions(wallet: string): Promise<TraderPosition
       realized_pnl,
       CASE WHEN position_cost_basis > 0 THEN (realized_pnl / position_cost_basis) * 100 END AS percent_return_approx,
       closed_at,
-      NULL::text AS end_date
+      NULL::text AS end_date,
+      event_type
     FROM per_position
     ORDER BY closed_at DESC NULLS LAST
   `;
