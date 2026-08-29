@@ -10,11 +10,25 @@ statistic). See conversation notes for the full derivation -- this is
 standard empirical Bayes / hierarchical shrinkage, the same family of
 technique actuaries and sports-analytics "true talent" models use.
 
-Runs ONCE per pipeline execution against the FULL current 90-day
-realized-PnL ledger (queried fresh from trader_realized_pnl_events),
-not just whatever activity this specific run happened to fetch --
-population stats (mu/sigma2/tau2) need to reflect everyone, regardless
-of which wallets had new activity today under incremental fetching.
+Runs ONCE per pipeline execution and needs population stats (mu/sigma2/
+tau2) that reflect the FULL current 90-day realized-PnL ledger across
+every tracked wallet, not just whoever had new activity today.
+
+INCREMENTAL as of 2026-08-29 (wallet_score_stats cache, see its comment
+in run_pipeline.py's SCHEMA): re-aggregating the entire
+trader_realized_pnl_events table from scratch every run was fine at one
+run/day, but scales linearly with run frequency for data that mostly
+hasn't changed -- switching to hourly would have meant 24x the egress
+for an almost-identical answer. Instead, each wallet's contribution to
+the population stats is cached as sufficient statistics (n, sum,
+sum-of-squares of its percent returns, plus dollar totals) in
+wallet_score_stats, and only re-derived from the real ledger for wallets
+with new realized-pnl activity this run, wallets never cached before, or
+wallets whose cache entry has gone stale (see fetch_position_returns).
+Everyone else's numbers come straight from the cache. The math is exact,
+not approximate -- mean/variance are fully recoverable from (n, sum,
+sumsq), so this is a reformulation of the original computation, not a
+different one.
 
 Computed here in Python, not live SQL, on purpose: the population-level
 aggregation (grand mean, pooled variance, between-trader variance via
@@ -26,6 +40,8 @@ precomputed number.
 """
 import math
 from datetime import datetime, timezone
+
+import psycopg2.extras
 
 # Below this cost basis, a percent return is too noisy to trust as a
 # skill signal -- a $2 position that resolves YES can legitimately
@@ -67,13 +83,29 @@ MAX_ABS_PCT_RETURN = 1000.0
 # longer read as near-infinite confidence.
 MIN_TRADER_VARIANCE = 100.0
 
+# How long a wallet's wallet_score_stats row can go without a real
+# re-check against trader_realized_pnl_events. Needed because a
+# position can age OUT of the rolling 90-day window with no new event
+# at all -- a wallet with zero new activity still needs an occasional
+# refresh or its cached stats would just go stale forever. Time-based
+# (not a fixed batch size/run) so the same ~1-day-max staleness holds
+# whether this pipeline runs hourly, daily, or anything in between --
+# at hourly cadence roughly 1/20th of cached wallets get swept up per
+# run; at daily cadence, effectively everyone does.
+STALE_AFTER_INTERVAL = "20 hours"
+
 
 def fetch_open_cost_basis(conn):
     """
     Total OPEN (never sold/redeemed/merged, unresolved) cost basis per
-    wallet, from wallet_open_ledger -- purely local/DB-side, no network
-    calls, so this is cheap even though wallet_open_ledger holds tens
-    of thousands of open positions across all tracked wallets combined.
+    wallet. Reads total_open_cost, a scalar column on wallet_open_ledger
+    maintained by run_pipeline.save_wallet_open_ledger (which already
+    holds each wallet's positions dict in memory at write time, so
+    computing the sum there is free) -- added 2026-08-29 alongside
+    wallet_score_stats below so this no longer has to pull the full
+    positions_json blob for every tracked wallet on every run just to
+    re-sum something that only actually changes when the ledger itself
+    changes.
 
     THIS EXISTS BECAUSE realized_pnl_90d/avg_edge_pct are built
     ENTIRELY from CLOSED positions (see fetch_position_returns) -- for
@@ -119,72 +151,157 @@ def fetch_open_cost_basis(conn):
     the site needs a headline PnL dollar amount.
     """
     with conn.cursor() as cur:
-        cur.execute("SELECT wallet, positions_json FROM wallet_open_ledger")
+        cur.execute("SELECT wallet, total_open_cost FROM wallet_open_ledger")
         rows = cur.fetchall()
-
-    open_cost_basis = {}
-    for wallet, positions_json in rows:
-        total = sum(float(p.get("cost") or 0.0) for p in positions_json.values())
-        open_cost_basis[wallet] = total
-    return open_cost_basis
+    return {wallet: float(cost) if cost is not None else 0.0 for wallet, cost in rows}
 
 
-def fetch_position_returns(conn):
+def fetch_position_returns(conn, changed_wallets=(), all_wallets=()):
     """
-    Aggregate the full 90-day realized-PnL ledger to one row per
-    position (wallet, condition_id) -- a partial sell followed by a
-    later full exit produces multiple ledger rows for what is really
-    one position, so this collapses them first, same reasoning as the
-    site's old per-position SQL CTEs.
+    Per-wallet sufficient statistics (n, sum, sum-of-squares of percent
+    returns; total realized PnL and closed cost basis dollars) for the
+    current rolling 90-day ledger, read from the wallet_score_stats
+    cache and kept correct there incrementally rather than recomputed
+    from trader_realized_pnl_events in full on every run.
+
+    Only three kinds of wallets get a real re-aggregation against the
+    ledger this run:
+      - changed_wallets: wallets with new realized-pnl events this run
+        (passed in from run_pipeline.run(), which already knows this
+        from its own incremental activity fetch -- see realized_rows).
+      - never before cached (new to tracking).
+      - cached but stale (their row's updated_at is older than
+        STALE_AFTER_INTERVAL) -- covers positions aging OUT of the
+        90-day window with no new event to trigger a refresh, and also
+        naturally re-verifies/expires wallets that have since dropped
+        out of tracking entirely (their row just keeps aging until it's
+        swept and found to have zero qualifying positions left, at
+        which point it's deleted rather than left stale forever).
+    Every other wallet's contribution comes straight from its existing
+    cache row. This is the same math as before, just not re-derived
+    from raw ledger rows for wallets whose ledger didn't actually
+    change -- position-level aggregation (SUM/GROUP BY) still happens
+    in Postgres, only now scoped to the wallets that actually need it.
+
+    Returns wallet -> {"n", "sum_returns", "sumsq_returns", "wallet_pnl",
+    "wallet_closed_cost"}. mean = sum_returns/n; sample variance =
+    (sumsq_returns - sum_returns**2/n) / (n-1) -- both exactly
+    recoverable from these three numbers, not an approximation of the
+    original per-position list.
 
     wallet_pnl (real dollar totals) includes every position regardless
     of size -- a tiny cost basis doesn't distort a dollar sum the way
     it distorts a percentage, and this is what the site displays as
-    Realized PnL, so it should reflect the full ledger. wallet_returns
-    (percent returns, feeding mu/sigma2/tau2 and each wallet's own
-    r_bar) excludes positions below MIN_POSITION_COST_BASIS or beyond
-    MAX_ABS_PCT_RETURN -- see the constants above for why. This does
-    mean position_count (len of a wallet's return list) can run a
-    little below their true total closed-position count for a wallet
-    with excluded dust positions; the site's own "All Positions" list
-    is a separate, unfiltered query and still shows every position.
-
-    Returns (wallet_returns, wallet_pnl, wallet_closed_cost):
-      wallet_returns:     wallet -> list of per-position percent returns
-      wallet_pnl:         wallet -> total realized PnL dollars (90d)
-      wallet_closed_cost: wallet -> total CLOSED cost basis dollars
-                          (90d, every position regardless of size --
-                          same "full ledger" reasoning as wallet_pnl).
-                          Paired with fetch_open_cost_basis's still-OPEN
-                          figure to get open_fraction in compute_scores;
-                          not used in the score math itself.
+    Realized PnL, so it should reflect the full ledger. The n/sum/sumsq
+    triple (percent returns, feeding mu/sigma2/tau2 and each wallet's
+    own r_bar) excludes positions below MIN_POSITION_COST_BASIS or
+    beyond MAX_ABS_PCT_RETURN -- see the constants above for why. This
+    does mean n can run a little below a wallet's true total closed-
+    position count for a wallet with excluded dust positions; the
+    site's own "All Positions" list is a separate, unfiltered query and
+    still shows every position. wallet_closed_cost is paired with
+    fetch_open_cost_basis's still-OPEN figure to get open_fraction in
+    compute_scores; not used in the score math itself.
     """
+    changed_wallets = set(changed_wallets)
+    all_wallets = set(all_wallets)
+
     with conn.cursor() as cur:
-        cur.execute("""
-            SELECT wallet, condition_id,
-                   SUM(realized_pnl) AS position_pnl,
-                   SUM(avg_cost * size) AS position_cost_basis
-            FROM trader_realized_pnl_events
-            WHERE closed_at IS NOT NULL
-              AND closed_at >= (NOW() - INTERVAL '90 days')
-            GROUP BY wallet, condition_id
-        """)
-        rows = cur.fetchall()
+        cur.execute("SELECT wallet FROM wallet_score_stats")
+        cached_wallets = {row[0] for row in cur.fetchall()}
+        never_cached = all_wallets - cached_wallets
 
-    wallet_returns, wallet_pnl, wallet_closed_cost = {}, {}, {}
-    for wallet, _condition_id, pnl, cost_basis in rows:
-        pnl = float(pnl) if pnl is not None else 0.0
-        cost_basis = float(cost_basis) if cost_basis is not None else 0.0
-        wallet_pnl[wallet] = wallet_pnl.get(wallet, 0.0) + pnl
-        wallet_closed_cost[wallet] = wallet_closed_cost.get(wallet, 0.0) + cost_basis
-        if cost_basis >= MIN_POSITION_COST_BASIS:
-            pct_return = (pnl / cost_basis) * 100
-            if abs(pct_return) <= MAX_ABS_PCT_RETURN:
-                wallet_returns.setdefault(wallet, []).append(pct_return)
-    return wallet_returns, wallet_pnl, wallet_closed_cost
+        cur.execute(
+            "SELECT wallet FROM wallet_score_stats WHERE updated_at < NOW() - %s::interval",
+            (STALE_AFTER_INTERVAL,),
+        )
+        stale = {row[0] for row in cur.fetchall()}
+
+        refresh_wallets = changed_wallets | never_cached | stale
+        if refresh_wallets:
+            cur.execute(
+                """
+                SELECT wallet, condition_id,
+                       SUM(realized_pnl) AS position_pnl,
+                       SUM(avg_cost * size) AS position_cost_basis
+                FROM trader_realized_pnl_events
+                WHERE wallet = ANY(%s)
+                  AND closed_at IS NOT NULL
+                  AND closed_at >= (NOW() - INTERVAL '90 days')
+                GROUP BY wallet, condition_id
+                """,
+                (list(refresh_wallets),),
+            )
+            position_rows = cur.fetchall()
+
+            fresh_stats = {}
+            for wallet, _condition_id, pnl, cost_basis in position_rows:
+                pnl = float(pnl) if pnl is not None else 0.0
+                cost_basis = float(cost_basis) if cost_basis is not None else 0.0
+                s = fresh_stats.setdefault(wallet, {
+                    "n": 0, "sum_returns": 0.0, "sumsq_returns": 0.0,
+                    "wallet_pnl": 0.0, "wallet_closed_cost": 0.0,
+                })
+                s["wallet_pnl"] += pnl
+                s["wallet_closed_cost"] += cost_basis
+                if cost_basis >= MIN_POSITION_COST_BASIS:
+                    pct_return = (pnl / cost_basis) * 100
+                    if abs(pct_return) <= MAX_ABS_PCT_RETURN:
+                        s["n"] += 1
+                        s["sum_returns"] += pct_return
+                        s["sumsq_returns"] += pct_return ** 2
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            upsert_rows = [
+                {**fresh_stats[wallet], "wallet": wallet, "updated_at": now_iso}
+                for wallet in refresh_wallets if wallet in fresh_stats
+            ]
+            # A refreshed wallet with no qualifying positions left at all
+            # (e.g. everything it had aged out of the 90-day window) gets
+            # its stale cache row deleted instead of left around with
+            # stale nonzero numbers forever.
+            emptied_wallets = [wallet for wallet in refresh_wallets if wallet not in fresh_stats]
+
+            if upsert_rows:
+                psycopg2.extras.execute_batch(
+                    cur,
+                    """
+                    INSERT INTO wallet_score_stats
+                    (wallet, n, sum_returns, sumsq_returns, wallet_pnl, wallet_closed_cost, updated_at)
+                    VALUES (%(wallet)s, %(n)s, %(sum_returns)s, %(sumsq_returns)s,
+                            %(wallet_pnl)s, %(wallet_closed_cost)s, %(updated_at)s)
+                    ON CONFLICT (wallet) DO UPDATE SET
+                        n = EXCLUDED.n,
+                        sum_returns = EXCLUDED.sum_returns,
+                        sumsq_returns = EXCLUDED.sumsq_returns,
+                        wallet_pnl = EXCLUDED.wallet_pnl,
+                        wallet_closed_cost = EXCLUDED.wallet_closed_cost,
+                        updated_at = EXCLUDED.updated_at
+                    """,
+                    upsert_rows,
+                )
+            if emptied_wallets:
+                cur.execute("DELETE FROM wallet_score_stats WHERE wallet = ANY(%s)", (emptied_wallets,))
+            conn.commit()
+
+        cur.execute(
+            "SELECT wallet, n, sum_returns, sumsq_returns, wallet_pnl, wallet_closed_cost FROM wallet_score_stats"
+        )
+        all_rows = cur.fetchall()
+
+    return {
+        wallet: {
+            "n": n,
+            "sum_returns": sum_returns,
+            "sumsq_returns": sumsq_returns,
+            "wallet_pnl": wallet_pnl,
+            "wallet_closed_cost": wallet_closed_cost,
+        }
+        for wallet, n, sum_returns, sumsq_returns, wallet_pnl, wallet_closed_cost in all_rows
+    }
 
 
-def compute_population_stats(wallet_returns: dict):
+def compute_population_stats(wallet_stats: dict):
     """
     mu:     pooled mean return across every position, every trader
     sigma2: pooled within-trader variance (how noisy a single trade
@@ -195,31 +312,38 @@ def compute_population_stats(wallet_returns: dict):
             "no detectable skill spread beyond noise, in this pool,"
             a real and legitimate possible outcome with a small wallet
             pool, not an error.
+
+    wallet_stats: wallet -> {"n", "sum_returns", "sumsq_returns", ...}
+    (see fetch_position_returns) -- derived from cached sufficient
+    statistics rather than raw per-position return lists; mean/variance
+    are exactly recoverable from (n, sum, sumsq), so this is the same
+    computation as operating on the raw lists, not an approximation.
     """
-    all_returns = [r for rs in wallet_returns.values() for r in rs]
-    n_total = len(all_returns)
-    if n_total == 0:
+    total_n = sum(s["n"] for s in wallet_stats.values())
+    if total_n == 0:
         return 0.0, 1.0, 0.0
 
-    mu = sum(all_returns) / n_total
+    total_sum = sum(s["sum_returns"] for s in wallet_stats.values())
+    total_sumsq = sum(s["sumsq_returns"] for s in wallet_stats.values())
+    mu = total_sum / total_n
 
     ss_within, df_within = 0.0, 0
-    for rs in wallet_returns.values():
-        n_i = len(rs)
+    for s in wallet_stats.values():
+        n_i = s["n"]
         if n_i < 2:
             continue
-        mean_i = sum(rs) / n_i
-        ss_within += sum((r - mean_i) ** 2 for r in rs)
+        ss_within += s["sumsq_returns"] - (s["sum_returns"] ** 2) / n_i
         df_within += n_i - 1
     if df_within > 0:
         sigma2 = ss_within / df_within
     else:
-        sigma2 = sum((r - mu) ** 2 for r in all_returns) / max(n_total - 1, 1)
+        ss_total = total_sumsq - 2 * mu * total_sum + total_n * mu ** 2
+        sigma2 = ss_total / max(total_n - 1, 1)
     sigma2 = max(sigma2, 1.0)  # floor -- avoid divide-by-zero degeneracy
 
-    trader_means = [sum(rs) / len(rs) for rs in wallet_returns.values() if rs]
+    trader_means = [s["sum_returns"] / s["n"] for s in wallet_stats.values() if s["n"] > 0]
     k_traders = len(trader_means)
-    n_bar = n_total / k_traders if k_traders else 1
+    n_bar = total_n / k_traders if k_traders else 1
     if k_traders > 1:
         grand_mean = sum(trader_means) / k_traders
         var_of_means = sum((m - grand_mean) ** 2 for m in trader_means) / (k_traders - 1)
@@ -230,8 +354,8 @@ def compute_population_stats(wallet_returns: dict):
     return mu, sigma2, tau2
 
 
-def compute_scores(wallet_returns: dict, wallet_pnl: dict, mu, sigma2, tau2, k=None,
-                    open_cost_basis: dict | None = None, wallet_closed_cost: dict | None = None):
+def compute_scores(wallet_stats: dict, mu, sigma2, tau2, k=None,
+                    open_cost_basis: dict | None = None):
     """
     Per-wallet: shrunk edge (theta_i), posterior uncertainty (omega_i),
     Z-score (theta_i / omega_i), and the final 0-100 Sirtio Score via a
@@ -249,12 +373,15 @@ def compute_scores(wallet_returns: dict, wallet_pnl: dict, mu, sigma2, tau2, k=N
     fetch_open_cost_basis's docstring for why.
     """
     results = []
-    for wallet, returns in wallet_returns.items():
-        n_i = len(returns)
-        r_bar = sum(returns) / n_i
+    for wallet, s in wallet_stats.items():
+        n_i = s["n"]
+        if n_i == 0:
+            continue
+        sum_i = s["sum_returns"]
+        r_bar = sum_i / n_i
 
         if n_i >= 5:
-            sigma_i2 = sum((r - r_bar) ** 2 for r in returns) / (n_i - 1)
+            sigma_i2 = (s["sumsq_returns"] - (sum_i ** 2) / n_i) / (n_i - 1)
             sigma_i2 = max(sigma_i2, MIN_TRADER_VARIANCE)
         else:
             sigma_i2 = sigma2  # too little personal data to trust their own variance
@@ -273,7 +400,7 @@ def compute_scores(wallet_returns: dict, wallet_pnl: dict, mu, sigma2, tau2, k=N
         z_i = theta_i / omega_i
 
         open_cost = (open_cost_basis or {}).get(wallet, 0.0)
-        closed_cost = (wallet_closed_cost or {}).get(wallet, 0.0)
+        closed_cost = s["wallet_closed_cost"]
         total_cost = open_cost + closed_cost
         open_fraction = (open_cost / total_cost) if total_cost > 0 else None
 
@@ -283,7 +410,7 @@ def compute_scores(wallet_returns: dict, wallet_pnl: dict, mu, sigma2, tau2, k=N
             "avg_edge_pct": r_bar,
             "shrunk_edge_pct": theta_i,
             "z_score": z_i,
-            "realized_pnl_90d": wallet_pnl.get(wallet, 0.0),
+            "realized_pnl_90d": s["wallet_pnl"],
             "open_cost_basis": open_cost,
             "open_fraction": open_fraction,
         })
@@ -304,18 +431,24 @@ def compute_scores(wallet_returns: dict, wallet_pnl: dict, mu, sigma2, tau2, k=N
     return results, k
 
 
-def run(conn):
+def run(conn, changed_wallets=(), all_wallets=()):
     """
-    Full computation against the current full 90-day ledger.
+    changed_wallets: wallets with new realized-pnl activity this run
+    (from run_pipeline.run()'s realized_rows) -- these get a real
+    re-aggregation against trader_realized_pnl_events; see
+    fetch_position_returns for the full incremental-refresh mechanics.
+    all_wallets: every wallet currently tracked this run (leaderboard
+    UNION top-scored UNION followed), used only to detect wallets never
+    cached before.
+
     Returns (results, population_stats). population_stats is logged
     and stored every run for visibility into how mu/sigma2/tau2/k
     drift over time as the wallet pool and their track records change.
     """
-    wallet_returns, wallet_pnl, wallet_closed_cost = fetch_position_returns(conn)
+    wallet_stats = fetch_position_returns(conn, changed_wallets, all_wallets)
     open_cost_basis = fetch_open_cost_basis(conn)
-    mu, sigma2, tau2 = compute_population_stats(wallet_returns)
-    results, k = compute_scores(wallet_returns, wallet_pnl, mu, sigma2, tau2,
-                                 open_cost_basis=open_cost_basis, wallet_closed_cost=wallet_closed_cost)
+    mu, sigma2, tau2 = compute_population_stats(wallet_stats)
+    results, k = compute_scores(wallet_stats, mu, sigma2, tau2, open_cost_basis=open_cost_basis)
     return results, {
         "mu": mu, "sigma2": sigma2, "tau2": tau2, "k": k,
         "n_wallets": len(results),

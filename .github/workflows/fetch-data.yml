@@ -2,34 +2,27 @@ name: Fetch market data
 
 on:
   schedule:
-    # Back to once daily as of 2026-08-16 -- was briefly switched to
-    # every 2 hours, which contributed to hitting Supabase's free-tier
-    # Egress cap (115% of 5GB in one billing cycle). See run_pipeline.py
-    # and the site's caching fixes from the same incident.
+    # Hourly as of 2026-08-29. Previously daily (and briefly every 2
+    # hours, which contributed to hitting Supabase's free-tier Egress
+    # cap at 115% of 5GB in one billing cycle -- see the incident notes
+    # in run_pipeline.py/sirtio_score.py and the site's caching fixes
+    # from the same incident). Going hourly is safe now that
+    # sirtio_score.py's population-stats reads are incremental
+    # (wallet_score_stats cache, see run_pipeline.py's SCHEMA) instead
+    # of re-aggregating the entire 90-day ledger from scratch on every
+    # run -- the thing that made run frequency the direct multiplier on
+    # egress before.
     #
-    # 07:35 UTC is deliberately NOT the desired landing time -- it's
-    # backed off from it to compensate for a confirmed, structural
-    # ~3h25m scheduling delay on this repo's GitHub Actions scheduler
-    # (confirmed live 2026-08-14 through 2026-08-16: three different
-    # cron values -- 13:00 UTC, 11:00 UTC, 11:17 UTC -- all produced
-    # the same ~3h23-26m delay regardless of value or whether they
-    # landed on the hour, ruling out both a top-of-hour GitHub-load
-    # theory and a stale-cron-cache theory. workflow_dispatch (manual)
-    # fired instantly and correctly every time throughout, confirming
-    # the workflow itself is fine -- only the schedule trigger is
-    # affected, specific to this account/repo).
-    #
-    # 07:35 UTC + ~3h25m delay lands the ACTUAL run around 11:00 UTC,
-    # which is ~7am Eastern during EDT (UTC-4, in effect now, August).
-    # GitHub Actions cron is always UTC and does NOT shift for daylight
-    # saving -- once EDT ends and EST (UTC-5) begins around November,
-    # this same 07:35 UTC will land around 6am Eastern instead, an hour
-    # earlier, not a new delay. If a real fix ever replaces this
-    # (an external trigger hitting workflow_dispatch on a real
-    # schedule, instead of depending on GitHub's own scheduler), this
-    # whole compensation goes away and the cron can just be set to the
-    # real desired UTC-equivalent of 7am Eastern directly.
-    - cron: "35 7 * * *"
+    # ":07" rather than the top of the hour, per GitHub's own guidance
+    # to avoid the exact-hour pileup of everyone else's cron jobs. Note
+    # a confirmed, structural ~3h25m scheduling delay was previously
+    # observed on this repo's GitHub Actions scheduler (2026-08-14
+    # through 2026-08-16, manual workflow_dispatch unaffected) -- with a
+    # single daily landing time that needed compensating for; at hourly
+    # cadence there's no single target time to hit, so a fixed lag just
+    # shifts every run's actual timestamp by the same amount without
+    # affecting how often the pipeline actually runs.
+    - cron: "7 * * * *"
   workflow_dispatch: {}  # lets you trigger it manually from the GitHub UI
 
 jobs:
