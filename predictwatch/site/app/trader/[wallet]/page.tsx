@@ -348,11 +348,14 @@ export default async function TraderPage({
 
         {stats.open_fraction !== null && stats.open_fraction > 0.4 && (
           <p className="mt-4 text-sm text-parchment max-w-3xl">
-            Heads up: an estimated {(stats.open_fraction * 100).toFixed(0)}% of this
-            trader&apos;s deployed capital is still sitting in open, unresolved
-            positions. The Avg edge and Sirtio Score above are based only on
-            positions that have actually closed -- they don&apos;t reflect that
-            remaining open book.
+            Heads up: a win has to be redeemed to become real money, but a
+            losing position that settled at $0 never has to be -- so the{" "}
+            {stats.position_count} closed positions this score is based on
+            skew toward wins by construction, not necessarily by skill. An
+            estimated {(stats.open_fraction * 100).toFixed(0)}% of {name}&apos;s
+            real money hasn&apos;t gone through that filter yet, so the Avg
+            edge and Sirtio Score above could be flattering their true
+            record until more of it resolves.
           </p>
         )}
 
