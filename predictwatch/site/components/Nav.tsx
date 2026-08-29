@@ -10,11 +10,16 @@ import DataFreshness from "./DataFreshness";
  * violating the Next.js rule that a Server Component can't be directly
  * imported and rendered from inside a "use client" file.
  *
- * Every page keeps doing exactly what it already did --
- * `import Nav from "@/components/Nav"` and `<Nav />` -- and
- * transparently gets the freshness badge with zero page-level changes,
- * now and for any future page that imports Nav this same way.
+ * showFreshness, added 2026-08-29: the freshness badge only makes
+ * sense on pages actually showing pipeline-derived data (the
+ * leaderboard, a trader's page) -- it read as out-of-place chrome on
+ * Methodology/Contact/Login/etc, which show nothing "fresh" at all.
+ * Defaults to false (opt-in) rather than true (opt-out) so a new page
+ * that imports Nav the plain `<Nav />` way -- the common case -- does
+ * NOT show it by default, and doesn't pay for the underlying
+ * getLastRefresh() Supabase query either, unlike before when every
+ * single page incurred it unconditionally.
  */
-export default function Nav() {
-  return <NavBar freshness={<DataFreshness />} />;
+export default function Nav({ showFreshness = false }: { showFreshness?: boolean } = {}) {
+  return <NavBar freshness={showFreshness ? <DataFreshness /> : null} />;
 }
