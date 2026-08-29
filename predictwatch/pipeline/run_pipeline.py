@@ -124,6 +124,41 @@ CREATE TABLE IF NOT EXISTS wallet_open_ledger (
     positions_json JSONB NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
+-- total_open_cost, added 2026-08-29 alongside wallet_score_stats below:
+-- a precomputed scalar sum of positions_json's per-asset "cost" values,
+-- maintained by save_wallet_open_ledger (which already holds the
+-- positions dict in memory at write time, so summing it there is
+-- free). Lets sirtio_score.py's fetch_open_cost_basis read one float
+-- column per wallet instead of the full positions_json blob for every
+-- tracked wallet on every run -- see wallet_score_stats below for why
+-- full reads on every run stopped being affordable once this pipeline
+-- moved from daily to hourly.
+ALTER TABLE wallet_open_ledger ADD COLUMN IF NOT EXISTS total_open_cost DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+-- Cached per-wallet sufficient statistics (n, sum, sum-of-squares) for
+-- the 90-day realized-PnL return distribution that feeds Sirtio Score's
+-- population stats (mu/sigma2/tau2 in sirtio_score.py) -- added
+-- 2026-08-29 so moving from daily to hourly runs doesn't mean
+-- re-aggregating the ENTIRE trader_realized_pnl_events table 24x more
+-- often for an answer that's almost always unchanged. Only wallets with
+-- new realized-pnl activity this run, a wallet never cached before, or
+-- a wallet whose row here has gone stale get re-aggregated from the
+-- real ledger (small, filtered queries); everyone else's contribution
+-- to the population stats comes straight from this table, which is one
+-- row per wallet rather than one row per closed position. See
+-- sirtio_score.py's fetch_position_returns for the full mechanics,
+-- including why staleness has to be time-based (a position can age OUT
+-- of the rolling 90-day window with no new event at all, so even an
+-- unchanged wallet needs an occasional re-check).
+CREATE TABLE IF NOT EXISTS wallet_score_stats (
+    wallet TEXT PRIMARY KEY,
+    n INTEGER NOT NULL,
+    sum_returns DOUBLE PRECISION NOT NULL,
+    sumsq_returns DOUBLE PRECISION NOT NULL,
+    wallet_pnl DOUBLE PRECISION NOT NULL,
+    wallet_closed_cost DOUBLE PRECISION NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
 
 -- Sirtio Score v2 (Bayesian shrinkage + Z-score) -- one row per wallet,
 -- computed once per pipeline run by sirtio_score.py against the full
@@ -654,16 +689,22 @@ def save_wallet_open_ledger(new_open_positions: dict, processed_wallets: list):
             if new_open_positions:
                 now_iso = datetime.now(timezone.utc).isoformat()
                 rows = [
-                    {"wallet": w, "positions_json": psycopg2.extras.Json(positions), "updated_at": now_iso}
+                    {
+                        "wallet": w,
+                        "positions_json": psycopg2.extras.Json(positions),
+                        "total_open_cost": sum(float(p.get("cost") or 0.0) for p in positions.values()),
+                        "updated_at": now_iso,
+                    }
                     for w, positions in new_open_positions.items()
                 ]
                 psycopg2.extras.execute_batch(
                     cur,
                     """
-                    INSERT INTO wallet_open_ledger (wallet, positions_json, updated_at)
-                    VALUES (%(wallet)s, %(positions_json)s, %(updated_at)s)
+                    INSERT INTO wallet_open_ledger (wallet, positions_json, total_open_cost, updated_at)
+                    VALUES (%(wallet)s, %(positions_json)s, %(total_open_cost)s, %(updated_at)s)
                     ON CONFLICT (wallet) DO UPDATE SET
                         positions_json = EXCLUDED.positions_json,
+                        total_open_cost = EXCLUDED.total_open_cost,
                         updated_at = EXCLUDED.updated_at
                     """,
                     rows,
@@ -823,6 +864,12 @@ def run():
         # (wallet_fetch_state) track the last successfully-fetched point per
         # wallet, so a wallet seen before only fetches NEW activity since
         # then. A wallet seen for the first time still gets a full backfill.
+        changed_wallets = set()  # wallets with new realized-pnl this run --
+        # passed to sirtio_score.run() below so it only re-aggregates the
+        # real ledger for wallets that actually changed (see
+        # wallet_score_stats in SCHEMA above). Stays empty if this stage
+        # is skipped or fails, which is the safe default -- sirtio_score
+        # then falls back to its own never-cached/stale-cache checks.
         try:
             if activity_wallets:
                 watermarks = get_wallet_watermarks(activity_wallets)
@@ -846,6 +893,7 @@ def run():
                     wallet_events, initial_open_positions=open_ledger
                 )
                 print(f"Realized PnL: {len(realized_rows)} events across {len(activity_wallets)} wallets")
+                changed_wallets = {r["wallet"] for r in realized_rows}
                 if realized_rows:
                     now = datetime.now(timezone.utc).isoformat()
                     for r in realized_rows:
@@ -863,19 +911,23 @@ def run():
             print(f"Polymarket trade-level realized PnL fetch failed: {e}")
             stage_failures.append("realized_pnl")
 
-        # Sirtio Score v2 (Bayesian shrinkage + Z-score) -- runs against the
-        # FULL current 90-day ledger in Supabase, independent of what this
-        # specific run fetched (population stats need to reflect every
-        # tracked wallet, not just ones with new activity today). See
+        # Sirtio Score v2 (Bayesian shrinkage + Z-score) -- population stats
+        # need to reflect every tracked wallet's current 90-day ledger, not
+        # just wallets with new activity today. As of 2026-08-29 this is
+        # incremental (see wallet_score_stats in SCHEMA above): only
+        # changed_wallets, never-cached wallets, and stale cache entries get
+        # re-read from the real ledger; everyone else comes from cache. See
         # sirtio_score.py for the full derivation.
         try:
-            print("Computing Sirtio Score (Bayesian shrinkage + Z-score) "
-                  "from the full realized-PnL ledger...")
+            print(f"Computing Sirtio Score (Bayesian shrinkage + Z-score) -- "
+                  f"incrementally refreshing {len(changed_wallets)} wallet(s) with new "
+                  f"activity this run against the real ledger, plus never-cached/stale "
+                  f"wallets, everyone else from cache...")
             conn = get_connection()
             try:
                 with conn.cursor() as cur:
                     cur.execute(SCHEMA)
-                results, pop_stats = sirtio_score.run(conn)
+                results, pop_stats = sirtio_score.run(conn, changed_wallets=changed_wallets, all_wallets=wallets)
                 latest_leaderboard_fetch = fetch_latest_leaderboard_timestamp(conn)
             finally:
                 conn.close()
