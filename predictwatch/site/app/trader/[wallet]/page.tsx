@@ -38,7 +38,7 @@ function positionsWindowLabel(trackingStartedAt: string | null): string {
   const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
   if (start > ninetyDaysAgo) {
     const dateText = start.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-    return `Since Tracked (${dateText})`;
+    return `Since Tracked ${dateText}`;
   }
   return "Last 90 Days";
 }
@@ -306,7 +306,7 @@ export default async function TraderPage({
         </p>
 
         <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
-          <div className="bg-surface-raised border border-accent/40 rounded-lg p-5 flex items-start gap-10">
+          <div className="bg-surface-raised border border-accent/40 rounded-lg p-5 flex items-start gap-6 sm:gap-10">
             <div className="text-center">
               <p className="font-mono text-xs uppercase tracking-wide text-muted">
                 Rank
@@ -431,22 +431,34 @@ export default async function TraderPage({
           const topWins = sorted.filter((p) => (p.realized_pnl ?? 0) > 0).slice(0, 5);
           const topLosses = sorted.filter((p) => (p.realized_pnl ?? 0) < 0).slice(-5).reverse();
 
-          const renderRow = (p: typeof positions[number], isWin: boolean) => (
-            <div key={p.condition_id}
-              className="grid grid-cols-[1fr_75px_55px] items-center gap-2 py-3 border-b border-hairline"
-            >
-              <div className="min-w-0">
-                <p className="text-sm text-parchment truncate">{p.market_title || "--"}</p>
-                <p className="text-xs text-muted mt-0.5 truncate">{p.outcome || "--"}</p>
+          const renderRow = (p: typeof positions[number], isWin: boolean) => {
+            const color = isWin ? "text-signal-yes" : "text-signal-no";
+            const pnlText = formatMoney(p.realized_pnl);
+            const returnText = p.percent_return_approx !== null ? `${p.percent_return_approx.toFixed(0)}%` : "--";
+            return (
+              <div key={p.condition_id} className="py-3 border-b border-hairline">
+                {/* Mobile: full-width title, PnL/Return on their own row --
+                    same fix as PositionsList, avoids truncating market
+                    names down to a handful of characters. */}
+                <div className="sm:hidden">
+                  <p className="text-sm text-parchment leading-snug">{p.market_title || "--"}</p>
+                  <p className="text-xs text-muted mt-0.5">{p.outcome || "--"}</p>
+                  <div className="flex items-center gap-4 mt-1.5">
+                    <span className={`font-mono text-sm ${color}`}>{pnlText}</span>
+                    <span className={`font-mono text-xs ${color}`}>{returnText}</span>
+                  </div>
+                </div>
+                <div className="hidden sm:grid sm:grid-cols-[1fr_75px_55px] sm:items-center sm:gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm text-parchment truncate">{p.market_title || "--"}</p>
+                    <p className="text-xs text-muted mt-0.5 truncate">{p.outcome || "--"}</p>
+                  </div>
+                  <span className={`font-mono text-xs text-right ${color}`}>{pnlText}</span>
+                  <span className={`font-mono text-xs text-right ${color}`}>{returnText}</span>
+                </div>
               </div>
-              <span className={`font-mono text-xs text-right ${isWin ? "text-signal-yes" : "text-signal-no"}`}>
-                {formatMoney(p.realized_pnl)}
-              </span>
-              <span className={`font-mono text-xs text-right ${isWin ? "text-signal-yes" : "text-signal-no"}`}>
-                {p.percent_return_approx !== null ? `${p.percent_return_approx.toFixed(0)}%` : "--"}
-              </span>
-            </div>
-          );
+            );
+          };
 
           return (
             <div className="mt-16 grid grid-cols-1 md:grid-cols-2 gap-10">
