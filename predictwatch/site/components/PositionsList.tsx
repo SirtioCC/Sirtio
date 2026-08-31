@@ -112,10 +112,14 @@ export default function PositionsList({ positions }: { positions: TraderPosition
       </div>
 
       <div className="bg-surface border border-accent/40 rounded-lg px-4 sm:px-6 pt-2">
-        <div className="grid grid-cols-[1fr_90px_80px] sm:grid-cols-[1fr_80px_90px_100px_90px] gap-3 sm:gap-4 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
+        {/* Column header only makes sense once Side/Entry/PnL/Return sit
+            in fixed columns, which only happens at sm+ -- see the mobile
+            row layout below, which stacks PnL/Return under the market
+            title instead of squeezing them into the same row. */}
+        <div className="hidden sm:grid sm:grid-cols-[1fr_80px_90px_100px_90px] gap-4 pb-3 border-b border-hairline text-xs uppercase tracking-wide text-muted">
           <span>Market</span>
-          <span className="hidden sm:block text-right">Side</span>
-          <span className="hidden sm:block text-right">Entry</span>
+          <span className="text-right">Side</span>
+          <span className="text-right">Entry</span>
           <span className="text-right">PnL</span>
           <span className="text-right">Return</span>
         </div>
@@ -124,19 +128,26 @@ export default function PositionsList({ positions }: { positions: TraderPosition
         ) : (
           visible.map((p) => {
             const meta = p.event_type ? EVENT_TYPES[p.event_type] : undefined;
+            const resolvedText = p.closed_at
+              ? `Resolved ${new Date(p.closed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+              : "Resolved";
+            const entryText = p.avg_price !== null ? `${(p.avg_price * 100).toFixed(0)}c` : "--";
+            const pnlPositive = (p.realized_pnl ?? 0) >= 0;
+            const returnPositive = (p.percent_return_approx ?? 0) >= 0;
+            const pnlText = formatMoney(p.realized_pnl);
+            const returnText = p.percent_return_approx !== null ? `${p.percent_return_approx.toFixed(0)}%` : "--";
+
             return (
-              <div
-                key={p.condition_id}
-                className="grid grid-cols-[1fr_90px_80px] sm:grid-cols-[1fr_80px_90px_100px_90px] items-center gap-3 sm:gap-4 py-3 border-b border-hairline"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm text-parchment truncate">{p.market_title || "--"}</p>
-                  <div className="flex items-center gap-1.5 text-xs text-muted mt-0.5">
-                    <span>
-                      {p.closed_at
-                        ? `Resolved ${new Date(p.closed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
-                        : "Resolved"}
-                    </span>
+              <div key={p.condition_id} className="py-3 border-b border-hairline">
+                {/* Mobile: title gets the full row width so long market
+                    names wrap onto a second line instead of truncating
+                    after a few characters; PnL/Return move to their own
+                    row underneath instead of fighting the title for
+                    horizontal space. */}
+                <div className="sm:hidden">
+                  <p className="text-sm text-parchment leading-snug">{p.market_title || "--"}</p>
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted mt-1">
+                    <span>{resolvedText}</span>
                     {meta && (
                       <>
                         <span aria-hidden="true">&middot;</span>
@@ -146,26 +157,51 @@ export default function PositionsList({ positions }: { positions: TraderPosition
                         </span>
                       </>
                     )}
+                    {p.outcome && (
+                      <>
+                        <span aria-hidden="true">&middot;</span>
+                        <span>{p.outcome}</span>
+                      </>
+                    )}
+                    <span aria-hidden="true">&middot;</span>
+                    <span>{entryText} entry</span>
+                  </div>
+                  <div className="flex items-center gap-4 mt-2">
+                    <span className={`font-mono text-sm ${pnlPositive ? "text-signal-yes" : "text-signal-no"}`}>
+                      {pnlText}
+                    </span>
+                    <span className={`font-mono text-xs ${returnPositive ? "text-signal-yes" : "text-signal-no"}`}>
+                      {returnText}
+                    </span>
                   </div>
                 </div>
-                <span className="hidden sm:block font-mono text-xs text-muted text-right">{p.outcome || "--"}</span>
-                <span className="hidden sm:block font-mono text-xs text-muted text-right">
-                  {p.avg_price !== null ? `${(p.avg_price * 100).toFixed(0)}c` : "--"}
-                </span>
-                <span
-                  className={`font-mono text-xs text-right ${
-                    (p.realized_pnl ?? 0) >= 0 ? "text-signal-yes" : "text-signal-no"
-                  }`}
-                >
-                  {formatMoney(p.realized_pnl)}
-                </span>
-                <span
-                  className={`font-mono text-xs text-right ${
-                    (p.percent_return_approx ?? 0) >= 0 ? "text-signal-yes" : "text-signal-no"
-                  }`}
-                >
-                  {p.percent_return_approx !== null ? `${p.percent_return_approx.toFixed(0)}%` : "--"}
-                </span>
+
+                {/* Desktop: fixed columns, as before. */}
+                <div className="hidden sm:grid sm:grid-cols-[1fr_80px_90px_100px_90px] sm:items-center sm:gap-4">
+                  <div className="min-w-0">
+                    <p className="text-sm text-parchment truncate">{p.market_title || "--"}</p>
+                    <div className="flex items-center gap-1.5 text-xs text-muted mt-0.5">
+                      <span>{resolvedText}</span>
+                      {meta && (
+                        <>
+                          <span aria-hidden="true">&middot;</span>
+                          <span className="inline-flex items-center gap-1">
+                            <EventDot dotClassName={meta.dotClassName} synthetic={meta.synthetic} />
+                            {meta.label}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <span className="font-mono text-xs text-muted text-right">{p.outcome || "--"}</span>
+                  <span className="font-mono text-xs text-muted text-right">{entryText}</span>
+                  <span className={`font-mono text-xs text-right ${pnlPositive ? "text-signal-yes" : "text-signal-no"}`}>
+                    {pnlText}
+                  </span>
+                  <span className={`font-mono text-xs text-right ${returnPositive ? "text-signal-yes" : "text-signal-no"}`}>
+                    {returnText}
+                  </span>
+                </div>
               </div>
             );
           })
