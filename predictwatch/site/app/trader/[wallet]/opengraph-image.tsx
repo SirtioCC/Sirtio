@@ -24,6 +24,27 @@ const PARCHMENT = "#ede7da";
 const MUTED = "#8d9bb8";
 const ACCENT = "#e8a33d";
 
+// next/og's ImageResponse has no bundled fallback typeface -- confirmed
+// live: with zero fonts registered it throws "No fonts are loaded"
+// outright, and with only Fraunces registered, EVERY span pulls glyphs
+// from that same Fraunces file regardless of its own fontFamily value,
+// including a value Satori has no font registered under (e.g. a generic
+// "sans-serif" that was never actually loaded) -- there's nothing else
+// for it to fall back to. Since the Fraunces file is subsetted to just
+// the brand wordmark/tier/trader-name text (loadGoogleFont's `text`
+// param), any other span whose own text happens to share letters with
+// that subset (near-guaranteed for ordinary English words -- "Elite"
+// and "Sirtio" alone cover e/l/i/t/s/r/o) rendered with those specific
+// letters in serif Fraunces and the rest in some renderer-internal
+// fallback glyph -- a mixed-font word, confirmed by zooming into a
+// rendered card. The actual fix is to register real fonts under real
+// names for every other style of text this card uses, and reference
+// those names explicitly -- not to name a family that isn't backed by
+// anything in `fonts`, which does nothing (verified: identical output
+// with and without it).
+const INTER = "Inter";
+const MONO = "IBM Plex Mono";
+
 function readLogoDataUri(): string | null {
   try {
     const file = fs.readFileSync(path.join(process.cwd(), "public", "logo.png"));
@@ -47,17 +68,19 @@ function StatBox({ label, value, highlight = false }: { label: string; value: st
         flex: 1,
       }}
     >
-      <span style={{ fontSize: 20, color: MUTED, textTransform: "uppercase", letterSpacing: 2 }}>
+      {/* fontFamily: INTER explicit on both spans -- see the note by
+          the INTER/MONO constants at the top of this file for why
+          leaving it unset (or naming an unregistered family) isn't
+          safe here. */}
+      <span style={{ fontSize: 18, color: MUTED, textTransform: "uppercase", letterSpacing: 1, fontFamily: INTER }}>
         {label}
       </span>
-      {/* Deliberately NOT fontFamily: "Fraunces" here -- confirmed live
-          that Satori mis-renders this font file's "+" glyph (a stray
-          detached vertical stroke instead of a plus sign) even though
-          it renders fine in a real browser and even though plain digits
-          render correctly. Satori's default font has no such issue, and
-          numeric stat values in a plain sans reads fine for a card like
-          this regardless. */}
-      <span style={{ fontSize: 44, color: highlight ? ACCENT : PARCHMENT }}>
+      {/* Also deliberately not Fraunces -- confirmed live that Satori
+          mis-renders this font file's "+" glyph (a stray detached
+          vertical stroke instead of a plus sign) even though it
+          renders fine in a real browser and even though plain digits
+          render correctly. */}
+      <span style={{ fontSize: 44, color: highlight ? ACCENT : PARCHMENT, fontFamily: INTER }}>
         {value}
       </span>
     </div>
@@ -114,12 +137,38 @@ export default async function Image({ params }: { params: Promise<{ wallet: stri
       ? `${stats.avg_edge_pct >= 0 ? "+" : ""}${stats.avg_edge_pct.toFixed(0)}%`
       : "--";
 
-  // Only needs to cover what's actually set in fontFamily: "Fraunces"
-  // below -- the brand wordmark, tier label, and trader name. Stat
-  // values (rankText/scoreText/edgeText) deliberately render in the
-  // default font instead; see StatBox's comment for why.
-  const fontText = `${name} ${tier ?? ""} Sirtio`;
+  // getDisplayName falls back to the truncated wallet itself when a
+  // trader has no username -- true for most tracked wallets. Rendering
+  // that fallback in 68px decorative Fraunces (meant for an actual
+  // human name) reads as a garbled hex string wearing a font it was
+  // never designed for, and it duplicated the exact same address on
+  // the monospace line right below it. A wallet-address name instead
+  // gets the same plain monospace treatment as the rest of the site
+  // (see the trader page's own CopyableWallet, the leaderboard rows),
+  // just larger, and only once.
+  const isWalletFallback = name === truncateWallet(stats.wallet);
+
+  // Only needs to cover what's actually set to fontFamily: "Fraunces"
+  // below -- the brand wordmark, the tier value (e.g. "Elite"), and a
+  // real trader name (skipped when it's just the wallet fallback, which
+  // renders in MONO instead -- see isWalletFallback above).
+  const fontText = `${isWalletFallback ? "" : name} ${tier ?? ""} Sirtio`;
   const font = await loadGoogleFont("Fraunces", 600, fontText);
+
+  // Unlike Fraunces, these two aren't subsetted to specific per-request
+  // text -- everything they render (stat labels/values, the footer
+  // tagline, "sirtio.com", and the wallet-address text) is either fully
+  // static across every card or drawn from a small fixed digit/symbol
+  // alphabet, so there's no real payload cost to just requesting the
+  // full charset, and it means nobody has to remember to extend a
+  // subset string the next time a label changes.
+  const interFont = await loadGoogleFont("Inter", 500);
+  const monoFont = await loadGoogleFont("IBM Plex Mono", 500);
+  const cardFonts = [
+    ...(font ? [{ name: "Fraunces", data: font, weight: 600 as const }] : []),
+    ...(interFont ? [{ name: INTER, data: interFont, weight: 500 as const }] : []),
+    ...(monoFont ? [{ name: MONO, data: monoFont, weight: 500 as const }] : []),
+  ];
 
   return new ImageResponse(
     (
@@ -156,7 +205,7 @@ export default async function Image({ params }: { params: Promise<{ wallet: stri
                 padding: "10px 22px",
               }}
             >
-              <span style={{ fontSize: 16, color: MUTED, textTransform: "uppercase", letterSpacing: 2 }}>
+              <span style={{ fontSize: 16, color: MUTED, textTransform: "uppercase", letterSpacing: 2, fontFamily: INTER }}>
                 Tier
               </span>
               <span style={{ fontSize: 26, color: ACCENT, fontFamily: "Fraunces", fontWeight: 700 }}>
@@ -167,12 +216,25 @@ export default async function Image({ params }: { params: Promise<{ wallet: stri
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <span style={{ fontSize: 68, color: PARCHMENT, fontFamily: "Fraunces", fontWeight: 700 }}>
-            {name}
-          </span>
-          <span style={{ fontSize: 24, color: MUTED, fontFamily: "monospace" }}>
-            {truncateWallet(stats.wallet)}
-          </span>
+          {isWalletFallback ? (
+            <span style={{ fontSize: 56, color: PARCHMENT, fontFamily: MONO, fontWeight: 700 }}>
+              {name}
+            </span>
+          ) : (
+            // An explicit wrapping div, not a <>...</> Fragment -- confirmed
+            // live that Satori doesn't stack a Fragment's children inside a
+            // column-flex parent the way a real DOM node's children would
+            // (the two spans rendered side by side instead of stacked). A
+            // genuine flex container sidesteps that entirely.
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontSize: 68, color: PARCHMENT, fontFamily: "Fraunces", fontWeight: 700 }}>
+                {name}
+              </span>
+              <span style={{ fontSize: 24, color: MUTED, fontFamily: MONO }}>
+                {truncateWallet(stats.wallet)}
+              </span>
+            </div>
+          )}
         </div>
 
         <div style={{ display: "flex", gap: 20 }}>
@@ -190,13 +252,13 @@ export default async function Image({ params }: { params: Promise<{ wallet: stri
             paddingTop: 20,
           }}
         >
-          <span style={{ fontSize: 20, color: MUTED }}>
+          <span style={{ fontSize: 20, color: MUTED, fontFamily: INTER }}>
             Is this trader actually good, or did they get lucky?
           </span>
-          <span style={{ fontSize: 20, color: ACCENT }}>sirtio.com</span>
+          <span style={{ fontSize: 20, color: ACCENT, fontFamily: INTER }}>sirtio.com</span>
         </div>
       </div>
     ),
-    { ...size, fonts: font ? [{ name: "Fraunces", data: font, weight: 600 as const }] : [] }
+    { ...size, fonts: cardFonts }
   );
 }
