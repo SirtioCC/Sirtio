@@ -148,11 +148,22 @@ export async function generateMetadata({ params }: TraderPageProps) {
   const name = getDisplayName(stats.username, stats.wallet);
   const scoreText =
     stats.pm_score !== null ? `Sirtio Score: ${stats.pm_score.toFixed(1)}. ` : "";
+  const title = `${name}: Polymarket Trader Profile`;
+  const description =
+    `${scoreText}${name}'s realized PnL, resolved positions, and trading ` +
+    `history on Polymarket, tracked and scored by Sirtio.`;
+
+  // openGraph/twitter aren't deep-merged with the root layout's defaults --
+  // a page that only sets the plain title/description above still shares
+  // the layout's static "Sirtio: Prediction Market Intelligence" og/twitter
+  // title, even though this route's opengraph-image.tsx renders a real,
+  // trader-specific card. That mismatch is exactly what shows up as the
+  // caption on X/Discord/Slack link previews, so it has to be set here too.
   return {
-    title: `${name}: Polymarket Trader Profile`,
-    description:
-      `${scoreText}${name}'s realized PnL, resolved positions, and trading ` +
-      `history on Polymarket, tracked and scored by Sirtio.`,
+    title,
+    description,
+    openGraph: { title, description },
+    twitter: { title, description },
   };
 }
 

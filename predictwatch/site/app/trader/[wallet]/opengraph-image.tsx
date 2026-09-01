@@ -33,7 +33,7 @@ function readLogoDataUri(): string | null {
   }
 }
 
-function StatBox({ label, value, big = false }: { label: string; value: string; big?: boolean }) {
+function StatBox({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
   return (
     <div
       style={{
@@ -57,7 +57,7 @@ function StatBox({ label, value, big = false }: { label: string; value: string; 
           render correctly. Satori's default font has no such issue, and
           numeric stat values in a plain sans reads fine for a card like
           this regardless. */}
-      <span style={{ fontSize: big ? 56 : 44, color: big ? ACCENT : PARCHMENT }}>
+      <span style={{ fontSize: 44, color: highlight ? ACCENT : PARCHMENT }}>
         {value}
       </span>
     </div>
@@ -131,7 +131,15 @@ export default async function Image({ params }: { params: Promise<{ wallet: stri
           flexDirection: "column",
           justifyContent: "space-between",
           backgroundColor: INK,
-          padding: 64,
+          // Extra bottom padding vs. the other three sides: link-preview
+          // clients (confirmed on X, and other platforms follow the same
+          // pattern) overlay their own title/domain caption as a bar
+          // pinned to the image's bottom edge. The old uniform 64px
+          // padding put this card's own footer row right where that
+          // overlay lands, so the two fought over the same pixels -- see
+          // the screenshot that prompted this. Real content now clears
+          // that zone with room to spare.
+          padding: "64px 64px 96px 64px",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -169,7 +177,7 @@ export default async function Image({ params }: { params: Promise<{ wallet: stri
 
         <div style={{ display: "flex", gap: 20 }}>
           <StatBox label="Rank" value={rankText} />
-          <StatBox label="Sirtio Score" value={scoreText} big />
+          <StatBox label="Sirtio Score" value={scoreText} highlight />
           <StatBox label="Avg Edge" value={edgeText} />
           <StatBox label="Positions (90d)" value={String(stats.position_count)} />
         </div>
