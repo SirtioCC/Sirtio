@@ -131,7 +131,15 @@ export default async function Image({ params }: { params: Promise<{ wallet: stri
           flexDirection: "column",
           justifyContent: "space-between",
           backgroundColor: INK,
-          padding: 64,
+          // Extra bottom padding vs. the other three sides: link-preview
+          // clients (confirmed on X, and other platforms follow the same
+          // pattern) overlay their own title/domain caption as a bar
+          // pinned to the image's bottom edge. The old uniform 64px
+          // padding put this card's own footer row right where that
+          // overlay lands, so the two fought over the same pixels -- see
+          // the screenshot that prompted this. Real content now clears
+          // that zone with room to spare.
+          padding: "64px 64px 96px 64px",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
