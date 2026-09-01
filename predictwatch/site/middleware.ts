@@ -35,6 +35,13 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|opengraph-image.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // .*opengraph-image$ excludes both the static app/opengraph-image.png
+    // AND the dynamic opengraph-image.tsx routes (root and
+    // trader/[wallet]) -- those are anonymous, cookie-free image
+    // responses for link-preview crawlers, never need a session refresh,
+    // and paid for one anyway: this middleware calling Supabase's auth
+    // API on every single fetch of a share card, the highest-volume
+    // crawler traffic on the site.
+    "/((?!_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|opengraph-image.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$|.*opengraph-image$).*)",
   ],
 };
