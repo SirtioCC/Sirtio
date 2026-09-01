@@ -33,7 +33,7 @@ function readLogoDataUri(): string | null {
   }
 }
 
-function StatBox({ label, value, big = false }: { label: string; value: string; big?: boolean }) {
+function StatBox({ label, value, highlight = false }: { label: string; value: string; highlight?: boolean }) {
   return (
     <div
       style={{
@@ -57,7 +57,7 @@ function StatBox({ label, value, big = false }: { label: string; value: string; 
           render correctly. Satori's default font has no such issue, and
           numeric stat values in a plain sans reads fine for a card like
           this regardless. */}
-      <span style={{ fontSize: big ? 56 : 44, color: big ? ACCENT : PARCHMENT }}>
+      <span style={{ fontSize: 44, color: highlight ? ACCENT : PARCHMENT }}>
         {value}
       </span>
     </div>
@@ -177,7 +177,7 @@ export default async function Image({ params }: { params: Promise<{ wallet: stri
 
         <div style={{ display: "flex", gap: 20 }}>
           <StatBox label="Rank" value={rankText} />
-          <StatBox label="Sirtio Score" value={scoreText} big />
+          <StatBox label="Sirtio Score" value={scoreText} highlight />
           <StatBox label="Avg Edge" value={edgeText} />
           <StatBox label="Positions (90d)" value={String(stats.position_count)} />
         </div>
