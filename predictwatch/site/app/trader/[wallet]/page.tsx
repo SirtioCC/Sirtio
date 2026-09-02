@@ -159,11 +159,17 @@ export async function generateMetadata({ params }: TraderPageProps) {
   // title, even though this route's opengraph-image.tsx renders a real,
   // trader-specific card. That mismatch is exactly what shows up as the
   // caption on X/Discord/Slack link previews, so it has to be set here too.
+  // card: "summary_large_image" has to be repeated here too, for the same
+  // reason -- overriding `twitter` at all replaces the whole object rather
+  // than merging into the layout's, so leaving it out silently dropped
+  // trader pages back to Twitter's small "summary" card default (confirmed
+  // live: trader page source showed twitter:card=summary while every other
+  // page correctly inherited summary_large_image from the layout).
   return {
     title,
     description,
     openGraph: { title, description },
-    twitter: { title, description },
+    twitter: { card: "summary_large_image", title, description },
   };
 }
 
