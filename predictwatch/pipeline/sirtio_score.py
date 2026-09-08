@@ -431,6 +431,49 @@ def compute_scores(wallet_stats: dict, mu, sigma2, tau2, k=None,
     return results, k
 
 
+def population_for_scoring(wallet_stats: dict, all_wallets):
+    """
+    Which cached wallets actually count toward this run's population
+    estimates (mu/sigma2/tau2) and toward compute_scores' k auto-
+    calibration -- and, as a consequence, which wallets get a fresh
+    sirtio_score at all.
+
+    Bounded to all_wallets (leaderboard UNION top-scored UNION followed,
+    each piece capped at roughly a few hundred by construction -- see
+    run_pipeline.py's comment on `wallets`) rather than every row
+    currently in wallet_score_stats. Those are NOT the same set:
+    fetch_position_returns only drops a wallet's cache row once ALL of
+    its positions have aged out of the rolling 90-day window, which can
+    take up to ~90 days of zero trading activity after a wallet falls
+    out of active tracking (off the leaderboard, out of Sirtio's own
+    top-100, unfollowed). Left unbounded, that cache keeps accumulating
+    wallets no longer relevant to "who should be compared to whom" --
+    typically low-position-count stragglers -- and every one of them
+    still feeds compute_population_stats and compute_scores' std_z.
+    More low-n wallets shrink harder toward the population mean
+    (compute_scores' theta_i), which pulls std_z down, which steepens
+    k, which pushes an UNCHANGED trader's score upward even though
+    nothing about their own trading changed -- confirmed live
+    2026-09-08: a customer's site went from one real Elite trader to
+    10+ across repeated pipeline runs against materially the same
+    underlying ledger data. Bounding the scoring population to
+    all_wallets keeps mu/sigma2/tau2/k derived from the same
+    currently-relevant, size-bounded pool every run, so re-running the
+    pipeline against unchanged trade data reproduces the same scores
+    and tiers rather than drifting.
+
+    Falls back to the full wallet_stats (old behavior) only when
+    all_wallets is empty -- the documented fallback for a run where
+    leaderboard/top-scored/followed fetching all failed (see
+    run_pipeline.run()); scoring the existing cache as-is beats scoring
+    nothing that run.
+    """
+    if not all_wallets:
+        return wallet_stats
+    tracked = set(all_wallets)
+    return {wallet: stats for wallet, stats in wallet_stats.items() if wallet in tracked}
+
+
 def run(conn, changed_wallets=(), all_wallets=()):
     """
     changed_wallets: wallets with new realized-pnl activity this run
@@ -438,8 +481,14 @@ def run(conn, changed_wallets=(), all_wallets=()):
     re-aggregation against trader_realized_pnl_events; see
     fetch_position_returns for the full incremental-refresh mechanics.
     all_wallets: every wallet currently tracked this run (leaderboard
-    UNION top-scored UNION followed), used only to detect wallets never
-    cached before.
+    UNION top-scored UNION followed). Used both to detect wallets never
+    cached before (fetch_position_returns) and to bound the population
+    that population stats / k are calibrated against (see
+    population_for_scoring) -- wallet_stats itself may still hold cache
+    rows for wallets that have since fallen out of tracking but haven't
+    aged out of the 90-day ledger yet; those are kept in the cache for
+    when/if they're tracked again, but excluded from this run's scoring
+    population.
 
     Returns (results, population_stats). population_stats is logged
     and stored every run for visibility into how mu/sigma2/tau2/k
@@ -447,8 +496,9 @@ def run(conn, changed_wallets=(), all_wallets=()):
     """
     wallet_stats = fetch_position_returns(conn, changed_wallets, all_wallets)
     open_cost_basis = fetch_open_cost_basis(conn)
-    mu, sigma2, tau2 = compute_population_stats(wallet_stats)
-    results, k = compute_scores(wallet_stats, mu, sigma2, tau2, open_cost_basis=open_cost_basis)
+    scoring_pool = population_for_scoring(wallet_stats, all_wallets)
+    mu, sigma2, tau2 = compute_population_stats(scoring_pool)
+    results, k = compute_scores(scoring_pool, mu, sigma2, tau2, open_cost_basis=open_cost_basis)
     return results, {
         "mu": mu, "sigma2": sigma2, "tau2": tau2, "k": k,
         "n_wallets": len(results),
