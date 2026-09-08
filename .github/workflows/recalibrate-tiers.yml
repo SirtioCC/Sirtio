@@ -1,0 +1,74 @@
+name: Recalibrate Sirtio Score tiers
+
+on:
+  schedule:
+    # Weekly rather than tied to the hourly fetch-data.yml cadence --
+    # the Elite cutoff (site/lib/tiers.ts) reflects a structural break
+    # in the score DISTRIBUTION, which shifts over days/weeks as the
+    # tracked population grows, not hour to hour. Recalibrating this
+    # often already has the recalibrate_tiers.py guardrails (min gap,
+    # min cluster size, max step, min meaningful change) to stop a
+    # single noisy run from moving the cutoff -- weekly just means
+    # there's less noise to guard against in the first place.
+    # Monday 09:00 UTC, chosen only to land mid-week-start with no
+    # particular significance -- move it if that's inconvenient.
+    - cron: "0 9 * * 1"
+  workflow_dispatch: {}  # lets you trigger a recalibration on demand from the GitHub UI
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  recalibrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r predictwatch/pipeline/requirements.txt
+
+      - name: Run recalibration
+        run: python recalibrate_tiers.py
+        working-directory: predictwatch/pipeline
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Check whether tiers.ts changed
+        id: diff
+        run: |
+          if git diff --quiet -- predictwatch/site/lib/tiers.ts; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Deliberately opens a PR instead of committing straight to main.
+      # This changes what every visitor sees as "Elite" -- unlike the
+      # hourly data pipeline (which only ever writes rows a human can
+      # re-derive by re-running it), a bad recalibration here is a
+      # judgment call a person should glance at before it goes live,
+      # even though recalibrate_tiers.py's own guardrails already rule
+      # out most of the ways this could misfire.
+      - name: Open pull request
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          BRANCH="auto/recalibrate-tiers-$(date -u +%Y%m%d-%H%M)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add predictwatch/site/lib/tiers.ts
+          git commit -m "Auto-recalibrate Sirtio Score Elite cutoff"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "Auto-recalibrate Sirtio Score Elite cutoff" \
+            --body "Scheduled recalibration (\`recalibrate_tiers.py\`) proposed a new \`SCORE_TIER_CUTOFFS.elite\` value against the live scored population. See the AUTO-RECALIBRATED comment block in \`predictwatch/site/lib/tiers.ts\` for the exact reasoning (population size, gap detected, guardrails applied). Please review the diff before merging -- this changes what real users see as \"Elite\" on the site." \
+            --base main \
+            --head "$BRANCH"
