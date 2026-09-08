@@ -28,8 +28,37 @@
 // one) and produce a believable shape: ~1% Elite, ~6% Great, ~16% Good,
 // ~64% Break even (the honest majority given how small most trader's
 // n_i still is), ~4% Below average, ~9% Poor.
+//
+// elite RAISED 90 -> 96 on 2026-09-08. That 08-27 shape assumed a small,
+// early tracked population; three weeks of leaderboard discovery grew
+// it to 165+ real wallets, and the Elite count grew right along with it
+// (1 -> 10+ -> 22) even AFTER fixing a separate real bug where
+// compute_scores/compute_population_stats (pipeline/sirtio_score.py)
+// were calibrated against wallet_score_stats' full, ever-growing cache
+// instead of the currently-tracked set (see population_for_scoring) --
+// that fix stopped the score from drifting on unchanged data, but did
+// NOT reduce the Elite count, because the count was never inflated by
+// noise. Verified directly against the raw ledger (trader_realized_
+// pnl_events) for the top "Elite" wallets: real trades, $500-2,000+
+// cost basis, buying in the $0.27-0.53 range and closing near
+// resolution -- genuine, replicable edge, not a computation artifact.
+// So the fix here isn't to the math, it's to a stale constant: with the
+// population's real distribution now this much bigger, re-checking it
+// (same exercise as 08-27) found 90 no longer sits on any real
+// boundary -- it cuts through a dense, continuous run of scores
+// (88-91) with no gap in sight. The scores DO have one clear structural
+// break: a 13-wallet cluster from 96.1-99.6, then a real ~3.5-point
+// gap down to 92.6 and a smooth continuum below that. 96 sits in that
+// gap, so Elite means "in that distinct top cluster" again rather than
+// an arbitrary point mid-continuum. Deliberately NOT re-derived as a
+// fixed top-N% of today's population -- pinning to a percentage is the
+// same mistake the pre-08-27 percentile scheme made (see top of file),
+// just recomputed by hand instead of live SQL. This cutoff will need
+// the same live re-check again as the tracked population keeps
+// maturing; it is a snapshot-calibrated constant, not a self-updating
+// one.
 export const SCORE_TIER_CUTOFFS = {
-  elite: 90,
+  elite: 96,
   great: 75,
   good: 60,
   breakEven: 40,

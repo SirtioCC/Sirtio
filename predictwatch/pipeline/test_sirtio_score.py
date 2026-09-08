@@ -70,7 +70,7 @@ TRACKED_WALLETS = {
     "poor_trader": wallet_stats(30, -20.0, 900.0),
 }
 
-ELITE_CUTOFF = 90  # mirrors site/lib/tiers.ts SCORE_TIER_CUTOFFS.elite
+ELITE_CUTOFF = 96  # mirrors site/lib/tiers.ts SCORE_TIER_CUTOFFS.elite
 
 
 class PopulationForScoringTest(unittest.TestCase):
