@@ -98,8 +98,9 @@ export default async function Home() {
                 ))}
               </div>
               <p className="text-xs text-muted/70 mt-4 leading-relaxed">
-                The Sirtio Score formula does a good job filtering out
-                bot accounts, but nothing is perfect.
+                Sirtio Score damps scores built on small sample sizes,
+                but a short track record can still look better than
+                it should.
               </p>
             </div>
           )}
