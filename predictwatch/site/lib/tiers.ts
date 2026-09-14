@@ -57,8 +57,13 @@
 // the same live re-check again as the tracked population keeps
 // maturing; it is a snapshot-calibrated constant, not a self-updating
 // one.
+// --- AUTO-RECALIBRATED (recalibrate_tiers.py) ---
+// 2026-09-14: elite -> 91.4. 46 candidates >= 75.0; largest gap 2.0 pt(s) at score 91.4 (target 91.4, stepped to 91.4 from current 96.0 under the 5.0-pt max-step guardrail). Population: 456 currently-scored wallet(s). Rewritten by the next scheduled run -- edit
+// SCORE_TIER_CUTOFFS.elite by hand if you need to override it immediately;
+// the dated history above this marker is permanent context, not touched here.
+// --- END AUTO-RECALIBRATED ---
 export const SCORE_TIER_CUTOFFS = {
-  elite: 96,
+  elite: 91.4,
   great: 75,
   good: 60,
   breakEven: 40,
