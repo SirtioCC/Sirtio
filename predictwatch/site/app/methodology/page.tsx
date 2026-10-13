@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Nav from "@/components/Nav";
-import { SCORE_TIER_CUTOFFS } from "@/lib/tiers";
+import { SCORE_TIER_CUTOFFS, MIN_POSITIONS_FOR_RANKING } from "@/lib/tiers";
 
 // Tier rows for the methodology page's Tiers table, derived from
 // SCORE_TIER_CUTOFFS (lib/tiers.ts) rather than a second hardcoded copy
@@ -125,6 +125,10 @@ export default function MethodologyPage() {
           </li>
           <li className="flex gap-3">
             <span className="text-accent mt-1">-</span>
+            <span>A trader needs at least {MIN_POSITIONS_FOR_RANKING} resolved positions in the 90-day window to appear on the leaderboard at all. Below that, we still compute a score for their own profile page, but we don't rank it against traders with a real track record -- it's shown as "Provisional" instead.</span>
+          </li>
+          <li className="flex gap-3">
+            <span className="text-accent mt-1">-</span>
             <span><strong className="text-parchment">50 is break-even.</strong> Above is a real, demonstrated edge; below isn't. <Link href="#tiers" className="text-accent hover:underline">Tiers</Link> (Elite down to Poor) are fixed points on that scale, not a guaranteed top-5%-gets-a-trophy ranking -- Elite can sit empty if nobody's earned it yet.</span>
           </li>
           <li className="flex gap-3">
@@ -190,7 +194,15 @@ export default function MethodologyPage() {
           wallet on the site was reading well below what the data
           actually supported. Both are fixed; scores reflect real
           performance again, and tiers moved from a forced top-5%
-          ranking to the fixed cutoffs described above.
+          ranking to the fixed cutoffs described above.{" "}
+          <strong className="text-parchment">Oct 13, 2026:</strong>{" "}
+          a wallet with exactly 5 resolved positions -- all five a
+          similar short-term trade -- briefly reached a perfect 100
+          score and the top leaderboard spot. We tightened how the
+          model weighs a trader's own variance at low sample sizes, and
+          added the {MIN_POSITIONS_FOR_RANKING}-position minimum described
+          above so a handful of trades can't rank against a full track
+          record regardless of how the math scores them.
         </p>
 
         <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">

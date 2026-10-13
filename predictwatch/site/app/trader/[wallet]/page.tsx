@@ -5,7 +5,7 @@ import FollowButton from "@/components/FollowButton";
 import PositionsList from "@/components/PositionsList";
 import { getTraderStats, getTraderPositions, getPositionsTrackingStart, resolveWallet, type TraderPosition } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
-import { scoreTier, SCORE_TIER_CUTOFFS } from "@/lib/tiers";
+import { scoreTier, SCORE_TIER_CUTOFFS, MIN_POSITIONS_FOR_RANKING } from "@/lib/tiers";
 // Was force-dynamic (fresh Supabase query on every single request) --
 // switched to a 5-minute revalidation window 2026-08-16 after this
 // hit Supabase's free-tier egress cap (115% of 5GB in one billing
@@ -73,6 +73,23 @@ function traderSummary(stats: {
     ? `${avg_edge_pct >= 0 ? "+" : ""}${avg_edge_pct.toFixed(0)}%`
     : "an unclear";
   const posText = `${position_count} resolved position${position_count === 1 ? "" : "s"}`;
+
+  // Provisional (below MIN_POSITIONS_FOR_RANKING): no tier-based verdict
+  // at all, not just no rank number. "Ranks among the most skilled
+  // traders we track" is a claim about standing relative to the whole
+  // pool -- exactly the claim a 5-position sample can't support, even
+  // when the raw score itself happens to compute high (see the
+  // Charlesqer incident in methodology's Recent Changes). Saying that
+  // right next to a "Provisional" badge would be self-contradicting.
+  if (position_count < MIN_POSITIONS_FOR_RANKING) {
+    return `Over the last 90 days, ${name} closed ${posText} on Polymarket ` +
+      `at an average return of ${edgeText} per position. That's too few ` +
+      `resolved trades for Sirtio to say with any confidence how ${name} ` +
+      `compares to the rest of the tracked pool -- at least ` +
+      `${MIN_POSITIONS_FOR_RANKING} are required before a trader is ranked ` +
+      `or placed in a tier.`;
+  }
+
   const rankText = rank !== null ? ` and currently sits at rank #${rank} on Sirtio's leaderboard` : "";
 
   let verdict: string;
@@ -232,6 +249,16 @@ export default async function TraderPage({
   }
 
   const name = getDisplayName(stats.username, stats.wallet);
+  // Gated on MIN_POSITIONS_FOR_RANKING, not just scoreTier(stats.pm_score)
+  // -- a wallet below the ranking floor can still compute a real,
+  // high-looking score (see the Charlesqer incident in methodology's
+  // Recent Changes), and showing an "Elite" tier badge next to a
+  // "Provisional" rank would directly contradict it. Every tier
+  // reference on this page (badge below, JSON-LD) reads from this one
+  // value so none of them can drift out of sync with each other.
+  const tier = stats.position_count >= MIN_POSITIONS_FOR_RANKING
+    ? scoreTier(stats.pm_score)
+    : null;
   // Structured data for rich snippets. Google Search Console flagged
   // this page's markup with "Invalid object type for field <parent_node>"
   // -- AggregateRating is only valid as a property of specific
@@ -267,8 +294,8 @@ export default async function TraderPage({
         ...(stats.realized_pnl_90d !== null
           ? [{ "@type": "PropertyValue", name: "Realized PnL (90d, USD)", value: stats.realized_pnl_90d.toFixed(0) }]
           : []),
-        ...(scoreTier(stats.pm_score)
-          ? [{ "@type": "PropertyValue", name: "Sirtio Tier", value: scoreTier(stats.pm_score) }]
+        ...(tier
+          ? [{ "@type": "PropertyValue", name: "Sirtio Tier", value: tier }]
           : []),
       ],
     },
@@ -303,7 +330,7 @@ export default async function TraderPage({
             </div>
           </div>
 
-          {scoreTier(stats.pm_score) && (
+          {tier && (
             <Link href="/methodology#tiers"
               className="bg-surface-raised border border-accent/40 hover:border-accent transition-colors rounded-lg px-6 py-3 text-center"
               title="See how tiers work on the Methodology page"
@@ -312,7 +339,7 @@ export default async function TraderPage({
                 Tier
               </p>
               <p className="font-[family-name:var(--font-title)] font-bold text-2xl text-accent">
-                {scoreTier(stats.pm_score)}
+                {tier}
               </p>
             </Link>
           )}
@@ -331,6 +358,11 @@ export default async function TraderPage({
               {stats.rank !== null ? (
                 <p className="font-[family-name:var(--font-display)] italic text-3xl text-parchment">
                   #{stats.rank}
+                </p>
+              ) : stats.position_count > 0 && stats.position_count < MIN_POSITIONS_FOR_RANKING ? (
+                <p className="text-xs text-muted mt-1 max-w-[10rem]">
+                  Provisional -- needs {MIN_POSITIONS_FOR_RANKING}+ resolved
+                  positions to rank
                 </p>
               ) : (
                 <p className="text-xs text-muted mt-1 max-w-[10rem]">

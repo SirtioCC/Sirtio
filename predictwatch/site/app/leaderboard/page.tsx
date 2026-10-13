@@ -4,7 +4,7 @@ import CopyableWallet from "@/components/CopyableWallet";
 import MarginTicker from "@/components/MarginTicker";
 import { getLeaderboard } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
-import { scoreTier } from "@/lib/tiers";
+import { scoreTier, MIN_POSITIONS_FOR_RANKING } from "@/lib/tiers";
 // Was force-dynamic (fresh Supabase query on every single request) --
 // switched to a 5-minute revalidation window 2026-08-16 after this
 // hit Supabase's free-tier egress cap (115% of 5GB in one billing
@@ -96,12 +96,15 @@ export default async function LeaderboardPage() {
         </p>
         <p className="text-body mb-10">
           This list currently shows the top {scoredTraders.length} traders
-          who meet the minimum requirements for a Sirtio Score. That
-          number moves day to day. A trader can be excluded because
-          they have no resolved positions in the last 90 days, or
-          because their trading activity looks automated, which we
-          filter out before scoring. They stay part of Polymarket's
-          tracked pool and may show up here once they qualify.
+          who meet the minimum requirements to rank. That number moves
+          day to day. A trader can be excluded because they have no
+          resolved positions in the last 90 days, because their trading
+          activity looks automated (which we filter out before
+          scoring), or because they have fewer than{" "}
+          {MIN_POSITIONS_FOR_RANKING} resolved positions in the window --
+          too small a sample to rank with any confidence, even with a
+          real-looking score. They stay part of Polymarket's tracked
+          pool and may show up here once they qualify.
         </p>
 
         {traders.length === 0 ? (

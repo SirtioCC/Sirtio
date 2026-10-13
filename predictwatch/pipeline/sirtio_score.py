@@ -63,25 +63,63 @@ MIN_POSITION_COST_BASIS = 25.0
 # allowed to dominate the pooled statistics on its own.
 MAX_ABS_PCT_RETURN = 1000.0
 # Same class of problem as the two guards above, one level up the
-# pipeline: compute_scores' per-trader sigma_i2 (n_i >= 5 branch) used
-# to floor at 1.0 -- fine when a trader's own returns have real spread,
-# but REDEEM events (added 2026-08-26) settle an abandoned losing
-# position at exactly -100%, so a wallet with many redeemed losses has
-# nearly ALL its returns clustered within a rounding error of -100%.
-# Sample variance on a near-degenerate cluster like that collapses
-# toward zero, and omega_i = 1/sqrt(n_i/sigma_i2 + 1/tau2) collapses
-# with it -- confirmed live 2026-08-27: one 57-position wallet hit
-# z = -755 this way, a statistically meaningless magnitude for a
-# Bayesian t-statistic. Worse, k (compute_scores' logistic steepness)
-# is auto-calibrated off std_z across the WHOLE population, so a
-# handful of these degenerate wallets silently crushed k -- and with
-# it, the displayed sirtio_score -- for every other trader too (the
-# top-ranked wallet site-wide was reading 61.1 instead of a defensible
-# ~95 purely because of this). 100.0 (a 10-percentage-point SD floor)
-# is conservative relative to the population's own ~76pt spread but
-# large enough that a near-identical run of redeemed losses can no
-# longer read as near-infinite confidence.
+# pipeline: compute_scores' per-trader sigma_i2 used to floor at 1.0 --
+# fine when a trader's own returns have real spread, but REDEEM events
+# (added 2026-08-26) settle an abandoned losing position at exactly
+# -100%, so a wallet with many redeemed losses has nearly ALL its
+# returns clustered within a rounding error of -100%. Sample variance
+# on a near-degenerate cluster like that collapses toward zero, and
+# omega_i = 1/sqrt(n_i/sigma_i2 + 1/tau2) collapses with it -- confirmed
+# live 2026-08-27: one 57-position wallet hit z = -755 this way, a
+# statistically meaningless magnitude for a Bayesian t-statistic. Worse,
+# k (compute_scores' logistic steepness) is auto-calibrated off std_z
+# across the WHOLE population, so a handful of these degenerate wallets
+# silently crushed k -- and with it, the displayed sirtio_score -- for
+# every other trader too (the top-ranked wallet site-wide was reading
+# 61.1 instead of a defensible ~95 purely because of this). 100.0 (a
+# 10-percentage-point SD floor) is conservative relative to the
+# population's own ~76pt spread but large enough that a near-identical
+# run of redeemed losses can no longer read as near-infinite confidence.
 MIN_TRADER_VARIANCE = 100.0
+
+# compute_scores USED to decide whether to trust a trader's own sigma_i2
+# at all via a hard cliff: n_i >= 5 trusted it completely, n_i < 5
+# ignored it completely and used the population's sigma2 instead.
+# Confirmed live 2026-10-13: that cliff is itself exploitable, not just
+# a crude approximation. A wallet (Charlesqer) with EXACTLY n_i=5
+# qualifying positions -- all five the same "buy cheap shares in a
+# near-certain market, exit near $0.999 right before resolution" move --
+# landed a sample variance of ~149 (genuinely low, because all five
+# trades looked alike) against a +238% raw average return. Per the old
+# branch, n_i=5 was enough to fully trust that ~149 variance as if it
+# were a well-estimated number, which drove the shrinkage weight to
+# ~99.4% on the trader's own raw average (theta_i barely moved off
+# +238%) and produced a literal 100/100 score, z=43.6, topping the
+# entire leaderboard off a five-trade sample. The underlying problem:
+# at n_i=5 (4 degrees of freedom), a trader's OWN variance estimate is
+# itself almost meaningless -- "this wallet's five trades look
+# consistent" is not strong evidence of a precisely-known edge, it's
+# easily just what a short lucky streak looks like. A binary switch at
+# an arbitrary n_i treats every wallet on one side of it as fully
+# credible and every wallet on the other as not credible at all, which
+# is both too blunt (a discontinuity right at the boundary, exactly
+# where this exploit landed) and wrong in direction (it rewards small
+# samples for LOOKING consistent, when a small sample's own apparent
+# consistency is exactly what should be trusted least).
+#
+# Replaced with continuous conjugate-prior variance shrinkage: blend a
+# trader's own sample variance with the population's sigma2, weighted
+# by degrees of freedom on each side (df_sample = n_i - 1 vs this many
+# "prior" pseudo-observations of sigma2). A wallet needs real depth of
+# history before its own variance estimate dominates the blend; at
+# n_i=5 the population prior still dominates ~4:1 (df_sample=4 vs
+# PRIOR_VARIANCE_DF=15), so a short lucky-looking streak can no longer
+# swing sigma_i2 (and with it, the shrinkage weight) nearly as far on
+# its own. 15 was chosen to roughly match this model's own existing
+# risk tolerance: it's the same order of magnitude as the ~10-20
+# resolved positions this file's other comments already treat as "real
+# depth of history" elsewhere, not a value tuned to this one incident.
+PRIOR_VARIANCE_DF = 15
 
 # How long a wallet's wallet_score_stats row can go without a real
 # re-check against trader_realized_pnl_events. Needed because a
@@ -380,11 +418,21 @@ def compute_scores(wallet_stats: dict, mu, sigma2, tau2, k=None,
         sum_i = s["sum_returns"]
         r_bar = sum_i / n_i
 
-        if n_i >= 5:
-            sigma_i2 = (s["sumsq_returns"] - (sum_i ** 2) / n_i) / (n_i - 1)
-            sigma_i2 = max(sigma_i2, MIN_TRADER_VARIANCE)
+        # Continuous variance shrinkage, not a binary n_i>=5 cliff -- see
+        # PRIOR_VARIANCE_DF's comment for the 2026-10-13 incident this
+        # replaces. df_sample=0 (n_i==1) makes this reduce exactly to the
+        # old "too little data, just use sigma2" behavior; df_sample
+        # growing relative to PRIOR_VARIANCE_DF is what lets a trader's
+        # own variance estimate progressively take over as real history
+        # accumulates, instead of flipping on/off at one arbitrary n_i.
+        df_sample = n_i - 1
+        if df_sample > 0:
+            sample_var = (s["sumsq_returns"] - (sum_i ** 2) / n_i) / df_sample
+            sample_var = max(sample_var, 0.0)
         else:
-            sigma_i2 = sigma2  # too little personal data to trust their own variance
+            sample_var = 0.0
+        sigma_i2 = (df_sample * sample_var + PRIOR_VARIANCE_DF * sigma2) / (df_sample + PRIOR_VARIANCE_DF)
+        sigma_i2 = max(sigma_i2, MIN_TRADER_VARIANCE)
 
         if tau2 > 0:
             w_i = (n_i / sigma_i2) / (n_i / sigma_i2 + 1 / tau2)

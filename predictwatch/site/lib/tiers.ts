@@ -65,6 +65,26 @@ export const SCORE_TIER_CUTOFFS = {
   belowAverage: 25,
 } as const;
 
+// Minimum resolved positions (90d) a wallet needs before it's eligible
+// to RANK on the leaderboard -- added 2026-10-13 after a 5-position
+// wallet (Charlesqer: 5 near-identical "buy cheap, exit near $0.999
+// right before resolution" trades) briefly topped the leaderboard at a
+// perfect 100/100. Fixing pipeline/sirtio_score.py's variance-shrinkage
+// math (see PRIOR_VARIANCE_DF there) stopped that specific wallet from
+// saturating the score scale, but re-running the corrected math against
+// live data still placed it at rank #49 of 520 -- a top-10% leaderboard
+// spot off five trades. The math fix makes the SCORE more honest at low
+// n; it doesn't by itself make five trades a believable sample to rank
+// a trader's skill against hundreds of others, so this is a separate,
+// deliberately blunt backstop: below this many resolved positions, a
+// wallet gets no leaderboard rank at all (see getLeaderboard/
+// getTraderStats in lib/queries.ts), shown as "Provisional" on its own
+// trader page instead. 10 isn't derived from the score math -- it's a
+// legibility choice, chosen because it's comfortably above the n_i<5
+// region sirtio_score.py already treats as "too little to trust a
+// wallet's own variance" at all.
+export const MIN_POSITIONS_FOR_RANKING = 10;
+
 // null (no score computed yet -- a wallet with no resolved positions)
 // degrades to no tier shown, not a crash or a fake "Poor" label.
 export function scoreTier(score: number | null): string | null {

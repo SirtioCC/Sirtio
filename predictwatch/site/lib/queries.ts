@@ -1,5 +1,6 @@
 import sql from "./db";
 import { cache } from "react";
+import { MIN_POSITIONS_FOR_RANKING } from "./tiers";
 
 export type LeaderboardTrader = {
   rank: number | null;
@@ -101,11 +102,17 @@ export async function getFollowedTraders(wallets: string[]): Promise<Leaderboard
       ORDER BY wallet, computed_at DESC
     ),
     ranked AS (
+      -- Eligibility floor, 2026-10-13: a wallet with fewer than
+      -- MIN_POSITIONS_FOR_RANKING resolved positions never gets a real
+      -- rank number here, even if it's followed (the outer LEFT JOIN
+      -- below just leaves rank NULL for it) -- see that constant's
+      -- comment in lib/tiers.ts for why.
       SELECT
         w.wallet,
         ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, w.wallet ASC) AS rank
       FROM all_wallets w
       LEFT JOIN latest_scores s ON s.wallet = w.wallet
+      WHERE COALESCE(s.position_count, 0) >= ${MIN_POSITIONS_FOR_RANKING}
     ),
     followed_wallets AS (
       SELECT wallet, username
@@ -195,6 +202,15 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
       ORDER BY wallet, computed_at DESC
     ),
     ranked AS (
+      -- Eligibility floor, 2026-10-13: wallets below
+      -- MIN_POSITIONS_FOR_RANKING resolved positions are filtered out
+      -- of this CTE entirely, so they never appear on the leaderboard
+      -- listing at all (not just unranked) -- see that constant's
+      -- comment in lib/tiers.ts. A wallet that got here with a real
+      -- score off a handful of lucky-looking trades (the Charlesqer
+      -- incident this fix is named for) shouldn't be ranked against
+      -- hundreds of traders with real track records, regardless of how
+      -- the score math itself treats it.
       SELECT
         ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, w.wallet ASC) AS rank,
         w.wallet,
@@ -207,6 +223,7 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
         s.sirtio_score AS pm_score
       FROM all_wallets w
       LEFT JOIN latest_scores s ON s.wallet = w.wallet
+      WHERE COALESCE(s.position_count, 0) >= ${MIN_POSITIONS_FOR_RANKING}
     ),
     latest_score_time AS (
       SELECT MAX(computed_at) AS t FROM trader_sirtio_scores
@@ -222,11 +239,16 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
       ORDER BY wallet, computed_at DESC
     ),
     previous_ranked AS (
+      -- Same eligibility floor as ranked above, applied to the prior
+      -- snapshot too -- otherwise a wallet that just crossed the
+      -- threshold would show a misleading prev_rank computed against a
+      -- differently-filtered population than its current rank.
       SELECT
         wallet,
         ROW_NUMBER() OVER (ORDER BY sirtio_score DESC NULLS LAST, wallet ASC) AS prev_rank
       FROM previous_scores
       WHERE sirtio_score IS NOT NULL
+        AND COALESCE(position_count, 0) >= ${MIN_POSITIONS_FOR_RANKING}
     )
     SELECT r.*, p.prev_rank
     FROM ranked r
@@ -354,6 +376,32 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
       ORDER BY wallet, computed_at DESC
     ),
     ranked AS (
+      -- Same MIN_POSITIONS_FOR_RANKING eligibility floor as
+      -- getLeaderboard -- a wallet below it comes back with rank NULL
+      -- here too, same as having no score at all, so this page and the
+      -- leaderboard always agree on whether a wallet is ranked. This is
+      -- the DISPLAYED rank -- see raw_ranked below for why is_tracked
+      -- deliberately does NOT use this one.
+      SELECT
+        w.wallet,
+        ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, w.wallet ASC) AS rank
+      FROM all_wallets w
+      LEFT JOIN latest_scores s ON s.wallet = w.wallet
+      WHERE s.sirtio_score IS NOT NULL
+        AND COALESCE(s.position_count, 0) >= ${MIN_POSITIONS_FOR_RANKING}
+    ),
+    raw_ranked AS (
+      -- Un-gated by MIN_POSITIONS_FOR_RANKING, on purpose -- this
+      -- mirrors run_pipeline.py's fetch_top_scored_wallets(), which
+      -- picks its top-100-by-score for the NEXT activity fetch straight
+      -- off sirtio_score ORDER BY, with no position-count floor of its
+      -- own. is_tracked below needs to answer "does the PIPELINE still
+      -- consider this wallet in its top 100," not "is this wallet
+      -- ranked on the public leaderboard" -- those stopped being the
+      -- same question the moment ranked above gained its own floor.
+      -- Using the gated ranked CTE here would wrongly tell a wallet the
+      -- pipeline is still actively fetching (e.g. a strong performer
+      -- with 6-9 positions) that tracking had paused.
       SELECT
         w.wallet,
         ROW_NUMBER() OVER (ORDER BY s.sirtio_score DESC NULLS LAST, w.wallet ASC) AS rank
@@ -373,12 +421,13 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
       s.z_score,
       s.sirtio_score AS pm_score,
       (
-        (r.rank IS NOT NULL AND r.rank <= 100)
+        (rr.rank IS NOT NULL AND rr.rank <= 100)
         OR EXISTS (SELECT 1 FROM follows f WHERE f.wallet = w.wallet)
       ) AS is_tracked
     FROM all_wallets w
     LEFT JOIN latest_scores s ON s.wallet = w.wallet
     LEFT JOIN ranked r ON r.wallet = w.wallet
+    LEFT JOIN raw_ranked rr ON rr.wallet = w.wallet
     WHERE w.wallet = ${wallet}
   `;
   if (rows.length === 0) return null;
