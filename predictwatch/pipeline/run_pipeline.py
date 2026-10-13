@@ -549,6 +549,39 @@ def prune_old_rank_snapshots(conn, retention_days=30):
     return deleted
 
 
+def prune_old_realized_pnl_events(conn, retention_days=90):
+    """
+    trader_realized_pnl_events is the raw trade-level ledger -- both
+    consumers of it (sirtio_score.py's population computation and
+    site/lib/queries.ts's getTraderPositions) only ever read
+    closed_at >= NOW() - 90 days, so anything older is pure unused
+    storage growth. Same category of bug already fixed for
+    trader_leaderboard_snapshots and trader_closed_positions_snapshots
+    (see their SCHEMA comments) -- this table just never got the same
+    treatment, and was 409MB (73% of the whole 0.5GB free-tier cap) by
+    2026-10-13 as a result.
+
+    Plain age-based delete, not the "keep each wallet's latest row"
+    pattern prune_old_sirtio_scores uses -- this table has no "current
+    state" concept to protect (that's what wallet_open_ledger is for);
+    every row here is a historical event, and events past the 90-day
+    window are read by nothing.
+
+    A row with closed_at IS NULL (rare -- only when the source activity
+    event was missing a timestamp) is never matched by `<`, so it's
+    left alone rather than deleted, same as it's already excluded from
+    every 90-day read query.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM trader_realized_pnl_events WHERE closed_at < NOW() - (%s * INTERVAL '1 day')",
+            (retention_days,),
+        )
+        deleted = cur.rowcount
+    conn.commit()
+    return deleted
+
+
 def save_leaderboard_to_supabase(rows):
     # source defaulted here rather than assumed present on each row --
     # fetch_polymarket_leaderboard.py's exact row shape wasn't in hand
@@ -980,6 +1013,16 @@ def run():
             print(f"Pruned {deleted} trader_daily_ranks row(s) older than 30 days")
         except Exception as e:
             print(f"trader_daily_ranks retention cleanup failed: {e}")
+
+        try:
+            conn = get_connection()
+            try:
+                deleted = prune_old_realized_pnl_events(conn)
+            finally:
+                conn.close()
+            print(f"Pruned {deleted} trader_realized_pnl_events row(s) older than 90 days")
+        except Exception as e:
+            print(f"trader_realized_pnl_events retention cleanup failed: {e}")
 
         if stage_failures:
             print(f"\nPipeline run completed with failures in: {stage_failures} "
