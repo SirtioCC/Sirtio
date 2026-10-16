@@ -241,7 +241,7 @@ export default async function Image({ params }: { params: Promise<{ wallet: stri
           <StatBox label="Rank" value={rankText} />
           <StatBox label="Sirtio Score" value={scoreText} highlight />
           <StatBox label="Avg Edge" value={edgeText} />
-          <StatBox label="Positions (90d)" value={String(stats.position_count)} />
+          <StatBox label="Positions (30d)" value={String(stats.position_count)} />
         </div>
 
         <div

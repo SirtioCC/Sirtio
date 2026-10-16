@@ -26,21 +26,21 @@ export const revalidate = 300;
 // tuned copy. See that file for why tiers are fixed on the 0-100 score.
 
 // Honest window label for the "All Positions" table, added 2026-08-26.
-// A wallet Sirtio started tracking less than 90 days ago has not had
-// a full 90-day window fetched -- a position that resolved before
+// A wallet Sirtio started tracking less than 30 days ago has not had
+// a full 30-day window fetched -- a position that resolved before
 // tracking began is missing from the table no matter what, so calling
-// it "Last 90 Days" overstates coverage. Falls back to "Last 90 Days"
+// it "Last 30 Days" overstates coverage. Falls back to "Last 30 Days"
 // when trackingStartedAt is null (no ledger rows yet at all) since
 // the empty-state message below the table already covers that case.
 function positionsWindowLabel(trackingStartedAt: string | null): string {
-  if (!trackingStartedAt) return "Last 90 Days";
+  if (!trackingStartedAt) return "Last 30 Days";
   const start = new Date(trackingStartedAt);
-  const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-  if (start > ninetyDaysAgo) {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  if (start > thirtyDaysAgo) {
     const dateText = start.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
     return `Since Tracked ${dateText}`;
   }
-  return "Last 90 Days";
+  return "Last 30 Days";
 }
 
 function formatMoney(v: number | null) {
@@ -66,7 +66,7 @@ function traderSummary(stats: {
 
   if (position_count === 0 || pm_score === null) {
     return `${name} doesn't have enough resolved positions in the ` +
-      `last 90 days yet for Sirtio to compute a reliable skill estimate.`;
+      `last 30 days yet for Sirtio to compute a reliable skill estimate.`;
   }
 
   const edgeText = avg_edge_pct !== null
@@ -82,7 +82,7 @@ function traderSummary(stats: {
   // Charlesqer incident in methodology's Recent Changes). Saying that
   // right next to a "Provisional" badge would be self-contradicting.
   if (position_count < MIN_POSITIONS_FOR_RANKING) {
-    return `Over the last 90 days, ${name} closed ${posText} on Polymarket ` +
+    return `Over the last 30 days, ${name} closed ${posText} on Polymarket ` +
       `at an average return of ${edgeText} per position. That's too few ` +
       `resolved trades for Sirtio to say with any confidence how ${name} ` +
       `compares to the rest of the tracked pool -- at least ` +
@@ -107,7 +107,7 @@ function traderSummary(stats: {
     verdict = `has clearly underperformed the rest of the tracked pool`;
   }
 
-  return `Over the last 90 days, ${name} closed ${posText} on Polymarket ` +
+  return `Over the last 30 days, ${name} closed ${posText} on Polymarket ` +
     `at an average return of ${edgeText} per position. Based on Sirtio's ` +
     `skill model, ${name} ${verdict}${rankText}.`;
 }
@@ -290,9 +290,9 @@ export default async function TraderPage({
         ...(stats.avg_edge_pct !== null
           ? [{ "@type": "PropertyValue", name: "Average Edge (per position)", value: `${stats.avg_edge_pct.toFixed(1)}%` }]
           : []),
-        { "@type": "PropertyValue", name: "Resolved Positions (90d)", value: stats.position_count },
-        ...(stats.realized_pnl_90d !== null
-          ? [{ "@type": "PropertyValue", name: "Realized PnL (90d, USD)", value: stats.realized_pnl_90d.toFixed(0) }]
+        { "@type": "PropertyValue", name: "Resolved Positions (30d)", value: stats.position_count },
+        ...(stats.realized_pnl_30d !== null
+          ? [{ "@type": "PropertyValue", name: "Realized PnL (30d, USD)", value: stats.realized_pnl_30d.toFixed(0) }]
           : []),
         ...(tier
           ? [{ "@type": "PropertyValue", name: "Sirtio Tier", value: tier }]
@@ -388,7 +388,7 @@ export default async function TraderPage({
             </p>
           </div>
           <div className="bg-surface-raised border border-accent/40 rounded-lg p-5">
-            <p className="text-xs uppercase tracking-wide text-muted mb-2">Positions (90d)</p>
+            <p className="text-xs uppercase tracking-wide text-muted mb-2">Positions (30d)</p>
             <p className="font-[family-name:var(--font-display)] text-3xl text-parchment">
               {stats.position_count}
             </p>
@@ -513,7 +513,7 @@ export default async function TraderPage({
             <div className="mt-16 grid grid-cols-1 md:grid-cols-2 gap-10">
               <div>
                 <h2 className="font-[family-name:var(--font-display)] text-xl text-parchment mb-4">
-                  Top 5 Wins (Last 90 Days)
+                  Top 5 Wins (Last 30 Days)
                 </h2>
                 {topWins.length > 0 ? (
                   <div>{topWins.map((p) => renderRow(p, true))}</div>
@@ -523,7 +523,7 @@ export default async function TraderPage({
               </div>
               <div>
                 <h2 className="font-[family-name:var(--font-display)] text-xl text-parchment mb-4">
-                  Top 5 Losses (Last 90 Days)
+                  Top 5 Losses (Last 30 Days)
                 </h2>
                 {topLosses.length > 0 ? (
                   <div>{topLosses.map((p) => renderRow(p, false))}</div>
@@ -563,7 +563,7 @@ export default async function TraderPage({
               resume tracking their live positions.
             </p>
           ) : positions.length === 0 ? (
-            <p className="text-sm text-body">No positions resolved in the last 90 days for this wallet.</p>
+            <p className="text-sm text-body">No positions resolved in the last 30 days for this wallet.</p>
           ) : (
             <PositionsList positions={positions} />
           )}

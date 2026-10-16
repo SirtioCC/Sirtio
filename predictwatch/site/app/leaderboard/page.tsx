@@ -77,7 +77,7 @@ export default async function LeaderboardPage() {
           "Monthly" leaderboard, the top 100 traders by profit over
           the last 30 days. It's not every Polymarket trader, and
           it's not an all-time ranking. Once we have that pool of 100
-          wallets, we score each one on their own using 90 days of
+          wallets, we score each one on their own using 30 days of
           realized PnL history to compute Sirtio Score, a different
           window than the monthly pull used to find them.
         </p>
@@ -98,7 +98,7 @@ export default async function LeaderboardPage() {
           This list currently shows the top {scoredTraders.length} traders
           who meet the minimum requirements to rank. That number moves
           day to day. A trader can be excluded because they have no
-          resolved positions in the last 90 days, because their trading
+          resolved positions in the last 30 days, because their trading
           activity looks automated (which we filter out before
           scoring), or because they have fewer than{" "}
           {MIN_POSITIONS_FOR_RANKING} resolved positions in the window --
@@ -118,7 +118,7 @@ export default async function LeaderboardPage() {
               <span>Trader</span>
               <span className="text-center">Sirtio Score</span>
               <span className="hidden sm:block text-center">Change (24hr)</span>
-              <span className="hidden sm:block text-center">Resolved Bets (Last 90D)</span>
+              <span className="hidden sm:block text-center">Resolved Bets (Last 30D)</span>
             </div>
             {scoredTraders.map((t, i) => (
               <div key={t.wallet}

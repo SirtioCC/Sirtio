@@ -64,7 +64,7 @@ export default async function FollowingPage() {
               <span className="hidden sm:block text-center">Current Leaderboard Rank</span>
               <span className="sm:hidden text-center">Rank</span>
               <span className="text-center">Sirtio Score</span>
-              <span className="hidden sm:block text-center">Resolved Bets (Last 90D)</span>
+              <span className="hidden sm:block text-center">Resolved Bets (Last 30D)</span>
             </div>
             {traders.map((t) => (
               <div key={t.wallet}

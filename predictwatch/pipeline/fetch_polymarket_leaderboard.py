@@ -4,7 +4,7 @@ No API key required — wallet activity is public by design (on-chain).
 Verified against a live response on 2026-08-10.
 
 Uses timePeriod=MONTH so the discovered wallet set roughly matches
-the 90-day window PM Score is computed over -- the endpoint defaults
+the 30-day window PM Score is computed over -- the endpoint defaults
 to DAY ("Today") if timePeriod isn't set, which would discover
 wallets based on a single lucky day rather than a track record.
 

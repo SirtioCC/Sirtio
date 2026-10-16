@@ -117,7 +117,7 @@ export default function MethodologyPage() {
           </li>
           <li className="flex gap-3">
             <span className="text-accent mt-1">-</span>
-            <span>The score is computed from each wallet's last 90 days of <strong className="text-parchment">realized PnL</strong> -- actual closed-position dollars, not "win rate," which is easy to game and hard to define cleanly on Polymarket.</span>
+            <span>The score is computed from each wallet's last 30 days of <strong className="text-parchment">realized PnL</strong> -- actual closed-position dollars, not "win rate," which is easy to game and hard to define cleanly on Polymarket.</span>
           </li>
           <li className="flex gap-3">
             <span className="text-accent mt-1">-</span>
@@ -125,7 +125,7 @@ export default function MethodologyPage() {
           </li>
           <li className="flex gap-3">
             <span className="text-accent mt-1">-</span>
-            <span>A trader needs at least {MIN_POSITIONS_FOR_RANKING} resolved positions in the 90-day window to appear on the leaderboard at all. Below that, we still compute a score for their own profile page, but we don't rank it against traders with a real track record -- it's shown as "Provisional" instead.</span>
+            <span>A trader needs at least {MIN_POSITIONS_FOR_RANKING} resolved positions in the 30-day window to appear on the leaderboard at all. Below that, we still compute a score for their own profile page, but we don't rank it against traders with a real track record -- it's shown as "Provisional" instead.</span>
           </li>
           <li className="flex gap-3">
             <span className="text-accent mt-1">-</span>
@@ -202,7 +202,14 @@ export default function MethodologyPage() {
           model weighs a trader's own variance at low sample sizes, and
           added the {MIN_POSITIONS_FOR_RANKING}-position minimum described
           above so a handful of trades can't rank against a full track
-          record regardless of how the math scores them.
+          record regardless of how the math scores them.{" "}
+          <strong className="text-parchment">Oct 15, 2026:</strong>{" "}
+          shrunk the realized-PnL window this score is computed from
+          from 90 days to 30, to keep the underlying trade-level
+          ledger within our database's storage limits. Scores were
+          recomputed under the new window, so numbers moved for most
+          traders -- this is a methodology change, not new trading
+          activity.
         </p>
 
         <h2 className="font-[family-name:var(--font-display)] text-2xl text-parchment mt-20 mb-6">
