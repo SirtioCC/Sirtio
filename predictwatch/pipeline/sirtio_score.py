@@ -11,7 +11,7 @@ standard empirical Bayes / hierarchical shrinkage, the same family of
 technique actuaries and sports-analytics "true talent" models use.
 
 Runs ONCE per pipeline execution and needs population stats (mu/sigma2/
-tau2) that reflect the FULL current 90-day realized-PnL ledger across
+tau2) that reflect the FULL current 30-day realized-PnL ledger across
 every tracked wallet, not just whoever had new activity today.
 
 INCREMENTAL as of 2026-08-29 (wallet_score_stats cache, see its comment
@@ -123,7 +123,7 @@ PRIOR_VARIANCE_DF = 15
 
 # How long a wallet's wallet_score_stats row can go without a real
 # re-check against trader_realized_pnl_events. Needed because a
-# position can age OUT of the rolling 90-day window with no new event
+# position can age OUT of the rolling 30-day window with no new event
 # at all -- a wallet with zero new activity still needs an occasional
 # refresh or its cached stats would just go stale forever. Time-based
 # (not a fixed batch size/run) so the same ~1-day-max staleness holds
@@ -145,11 +145,13 @@ def fetch_open_cost_basis(conn):
     re-sum something that only actually changes when the ledger itself
     changes.
 
-    THIS EXISTS BECAUSE realized_pnl_90d/avg_edge_pct are built
+    THIS EXISTS BECAUSE realized_pnl_30d/avg_edge_pct are built
     ENTIRELY from CLOSED positions (see fetch_position_returns) -- for
     an active high-frequency wallet that keeps most of its capital
     continuously deployed, that can be a small, self-selected slice of
-    its real exposure. Confirmed live 2026-08-28: comparing our
+    its real exposure. Confirmed live 2026-08-28 (back when this window
+    was still 90 days, before the 2026-10-15 switch to 30 -- see
+    run_pipeline.py's prune_old_realized_pnl_events): comparing our
     computed realized_pnl_90d for the #1-ranked wallet against
     Polymarket's OWN leaderboard pnl for the same wallet in the same
     trader_leaderboard_snapshots table showed a ~13x gap ($1.74M vs
@@ -198,7 +200,7 @@ def fetch_position_returns(conn, changed_wallets=(), all_wallets=()):
     """
     Per-wallet sufficient statistics (n, sum, sum-of-squares of percent
     returns; total realized PnL and closed cost basis dollars) for the
-    current rolling 90-day ledger, read from the wallet_score_stats
+    current rolling 30-day ledger, read from the wallet_score_stats
     cache and kept correct there incrementally rather than recomputed
     from trader_realized_pnl_events in full on every run.
 
@@ -210,7 +212,7 @@ def fetch_position_returns(conn, changed_wallets=(), all_wallets=()):
       - never before cached (new to tracking).
       - cached but stale (their row's updated_at is older than
         STALE_AFTER_INTERVAL) -- covers positions aging OUT of the
-        90-day window with no new event to trigger a refresh, and also
+        30-day window with no new event to trigger a refresh, and also
         naturally re-verifies/expires wallets that have since dropped
         out of tracking entirely (their row just keeps aging until it's
         swept and found to have zero qualifying positions left, at
@@ -265,7 +267,7 @@ def fetch_position_returns(conn, changed_wallets=(), all_wallets=()):
                 FROM trader_realized_pnl_events
                 WHERE wallet = ANY(%s)
                   AND closed_at IS NOT NULL
-                  AND closed_at >= (NOW() - INTERVAL '90 days')
+                  AND closed_at >= (NOW() - INTERVAL '30 days')
                 GROUP BY wallet, condition_id
                 """,
                 (list(refresh_wallets),),
@@ -295,7 +297,7 @@ def fetch_position_returns(conn, changed_wallets=(), all_wallets=()):
                 for wallet in refresh_wallets if wallet in fresh_stats
             ]
             # A refreshed wallet with no qualifying positions left at all
-            # (e.g. everything it had aged out of the 90-day window) gets
+            # (e.g. everything it had aged out of the 30-day window) gets
             # its stale cache row deleted instead of left around with
             # stale nonzero numbers forever.
             emptied_wallets = [wallet for wallet in refresh_wallets if wallet not in fresh_stats]
@@ -458,7 +460,7 @@ def compute_scores(wallet_stats: dict, mu, sigma2, tau2, k=None,
             "avg_edge_pct": r_bar,
             "shrunk_edge_pct": theta_i,
             "z_score": z_i,
-            "realized_pnl_90d": s["wallet_pnl"],
+            "realized_pnl_30d": s["wallet_pnl"],
             "open_cost_basis": open_cost,
             "open_fraction": open_fraction,
         })
@@ -491,8 +493,8 @@ def population_for_scoring(wallet_stats: dict, all_wallets):
     run_pipeline.py's comment on `wallets`) rather than every row
     currently in wallet_score_stats. Those are NOT the same set:
     fetch_position_returns only drops a wallet's cache row once ALL of
-    its positions have aged out of the rolling 90-day window, which can
-    take up to ~90 days of zero trading activity after a wallet falls
+    its positions have aged out of the rolling 30-day window, which can
+    take up to ~30 days of zero trading activity after a wallet falls
     out of active tracking (off the leaderboard, out of Sirtio's own
     top-100, unfollowed). Left unbounded, that cache keeps accumulating
     wallets no longer relevant to "who should be compared to whom" --
@@ -534,7 +536,7 @@ def run(conn, changed_wallets=(), all_wallets=()):
     that population stats / k are calibrated against (see
     population_for_scoring) -- wallet_stats itself may still hold cache
     rows for wallets that have since fallen out of tracking but haven't
-    aged out of the 90-day ledger yet; those are kept in the cache for
+    aged out of the 30-day ledger yet; those are kept in the cache for
     when/if they're tracked again, but excluded from this run's scoring
     population.
 

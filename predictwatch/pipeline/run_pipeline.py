@@ -136,7 +136,7 @@ CREATE TABLE IF NOT EXISTS wallet_open_ledger (
 ALTER TABLE wallet_open_ledger ADD COLUMN IF NOT EXISTS total_open_cost DOUBLE PRECISION NOT NULL DEFAULT 0;
 
 -- Cached per-wallet sufficient statistics (n, sum, sum-of-squares) for
--- the 90-day realized-PnL return distribution that feeds Sirtio Score's
+-- the 30-day realized-PnL return distribution that feeds Sirtio Score's
 -- population stats (mu/sigma2/tau2 in sirtio_score.py) -- added
 -- 2026-08-29 so moving from daily to hourly runs doesn't mean
 -- re-aggregating the ENTIRE trader_realized_pnl_events table 24x more
@@ -148,7 +148,7 @@ ALTER TABLE wallet_open_ledger ADD COLUMN IF NOT EXISTS total_open_cost DOUBLE P
 -- row per wallet rather than one row per closed position. See
 -- sirtio_score.py's fetch_position_returns for the full mechanics,
 -- including why staleness has to be time-based (a position can age OUT
--- of the rolling 90-day window with no new event at all, so even an
+-- of the rolling 30-day window with no new event at all, so even an
 -- unchanged wallet needs an occasional re-check).
 CREATE TABLE IF NOT EXISTS wallet_score_stats (
     wallet TEXT PRIMARY KEY,
@@ -162,7 +162,7 @@ CREATE TABLE IF NOT EXISTS wallet_score_stats (
 
 -- Sirtio Score v2 (Bayesian shrinkage + Z-score) -- one row per wallet,
 -- computed once per pipeline run by sirtio_score.py against the full
--- 90-day ledger, not live SQL per page load. The site reads this table
+-- 30-day ledger, not live SQL per page load. The site reads this table
 -- directly instead of deriving the score itself.
 CREATE TABLE IF NOT EXISTS trader_sirtio_scores (
     id BIGSERIAL PRIMARY KEY,
@@ -171,8 +171,8 @@ CREATE TABLE IF NOT EXISTS trader_sirtio_scores (
     avg_edge_pct DOUBLE PRECISION,
     shrunk_edge_pct DOUBLE PRECISION,
     z_score DOUBLE PRECISION,
-    realized_pnl_90d DOUBLE PRECISION,
-    -- open_cost_basis/open_fraction, added 2026-08-28: realized_pnl_90d/
+    realized_pnl_30d DOUBLE PRECISION,
+    -- open_cost_basis/open_fraction, added 2026-08-28: realized_pnl_30d/
     -- avg_edge_pct above are built ENTIRELY from CLOSED positions (see
     -- sirtio_score.py's fetch_position_returns) -- for an active wallet
     -- that keeps most of its capital continuously deployed, that can be
@@ -410,18 +410,32 @@ def fetch_top_scored_wallets(conn, limit=100):
     fell off Polymarket's list while the site kept ranking him #2 with
     no indication anything had stopped updating.
 
-    Ranked the same way site/lib/queries.ts ranks the leaderboard --
-    latest score per wallet, ORDER BY sirtio_score DESC NULLS LAST,
-    wallet ASC as a deterministic tiebreaker -- so "top 100 tracked
-    here" and "top 100 shown on the site" are always the same set,
-    computed off yesterday's scores at the start of each run (today's
-    scores don't exist yet until this same run computes them further
-    down). Bounded growth, same property fetch_followed_wallets already
-    has: always ~limit wallets regardless of how many have ever been
-    discovered, unlike "track every wallet forever" (rejected as
-    unbounded -- see the 2026-08-18 retention discussion referenced
-    below) -- this just anchors the bound to Sirtio's own ranking
-    instead of Polymarket's.
+    Latest score per wallet, ORDER BY sirtio_score DESC NULLS LAST,
+    wallet ASC as a deterministic tiebreaker, computed off yesterday's
+    scores at the start of each run (today's scores don't exist yet
+    until this same run computes them further down). Bounded growth,
+    same property fetch_followed_wallets already has: always ~limit
+    wallets regardless of how many have ever been discovered, unlike
+    "track every wallet forever" (rejected as unbounded -- see the
+    2026-08-18 retention discussion referenced below) -- this just
+    anchors the bound to Sirtio's own ranking instead of Polymarket's.
+
+    Deliberately NOT ranked the same way site/lib/queries.ts ranks the
+    public leaderboard anymore. getLeaderboard/getTraderStats gained a
+    MIN_POSITIONS_FOR_RANKING floor on 2026-10-13 (see that constant's
+    comment in site/lib/tiers.ts) that excludes/unranks wallets with
+    too few resolved positions to trust a score against -- a display
+    legibility gate, not a signal that a wallet's activity has stopped
+    mattering. Applying that same floor here would be
+    self-defeating: a wallet sitting just below it only ever crosses
+    it by having its activity fetched and new resolved positions
+    counted, so excluding it from this set would freeze its
+    position_count below the floor forever -- the exact Flipadelphia-
+    style "silently stopped updating" failure this function exists to
+    prevent, just triggered by position count instead of falling off
+    Polymarket's list. site/lib/queries.ts's raw_ranked CTE (used for
+    is_tracked) already relies on this function staying unfloored --
+    see its comment there.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -549,28 +563,42 @@ def prune_old_rank_snapshots(conn, retention_days=30):
     return deleted
 
 
-def prune_old_realized_pnl_events(conn, retention_days=90):
+def prune_old_realized_pnl_events(conn, retention_days=30):
     """
     trader_realized_pnl_events is the raw trade-level ledger -- both
     consumers of it (sirtio_score.py's population computation and
     site/lib/queries.ts's getTraderPositions) only ever read
-    closed_at >= NOW() - 90 days, so anything older is pure unused
+    closed_at >= NOW() - 30 days, so anything older is pure unused
     storage growth. Same category of bug already fixed for
     trader_leaderboard_snapshots and trader_closed_positions_snapshots
     (see their SCHEMA comments) -- this table just never got the same
     treatment, and was 409MB (73% of the whole 0.5GB free-tier cap) by
     2026-10-13 as a result.
 
+    Window shrunk from 90 to 30 days on 2026-10-15: even with this
+    prune already running correctly, the table was still 330MB/431K
+    rows and the database as a whole was at 482MB against the free
+    tier's 500MB cap, with no further bug to fix -- just the organic
+    cost of a 90-day trade-level ledger. 30 days cuts row count by
+    ~60% (258,410 of 431,115 rows were already >30 days old when this
+    was measured), which is by far the single biggest lever available
+    short of paying for more storage. This narrows what "Sirtio Score"
+    and "90-day PnL" mean site-wide, not just a backend retention knob
+    -- see site/lib/tiers.ts, the methodology page, and every "90-day"
+    label across the site, all updated alongside this change. Scores
+    need a full recompute against the new window, not just a prune --
+    see run()'s wallet_score_stats cache-clear around this call.
+
     Plain age-based delete, not the "keep each wallet's latest row"
     pattern prune_old_sirtio_scores uses -- this table has no "current
     state" concept to protect (that's what wallet_open_ledger is for);
-    every row here is a historical event, and events past the 90-day
+    every row here is a historical event, and events past the 30-day
     window are read by nothing.
 
     A row with closed_at IS NULL (rare -- only when the source activity
     event was missing a timestamp) is never matched by `<`, so it's
     left alone rather than deleted, same as it's already excluded from
-    every 90-day read query.
+    every 30-day read query.
     """
     with conn.cursor() as cur:
         cur.execute(
@@ -753,6 +781,56 @@ def save_wallet_open_ledger(new_open_positions: dict, processed_wallets: list):
         conn.close()
 
 
+def prune_untracked_wallet_state(conn, tracked_wallets: set):
+    """
+    Delete wallet_open_ledger and wallet_fetch_state rows for any wallet
+    NOT in this run's tracked set (leaderboard_wallets | top_scored_wallets
+    | followed_wallets, computed in run() before this is called) -- the
+    only three things that keep a wallet's activity getting re-fetched
+    (see run()'s comment on "Still bounded growth" above them). A wallet
+    that falls out of all three has nothing left that will ever fetch its
+    activity again, so its ledger/watermark rows are pure dead weight --
+    this was unbounded growth hiding behind a claim of bounded growth:
+    wallet_open_ledger had no prune of its own (unlike market_snapshots,
+    trader_realized_pnl_events, and trader_sirtio_scores, which each got
+    one when they hit the same problem) even though the wallet SET
+    feeding it is bounded. Confirmed live 2026-10-15: 539 of 639
+    wallet_open_ledger rows belonged to wallets no longer in the tracked
+    set, accounting for ~50MB of the table's ~94MB on-disk size, right as
+    the database hit its storage cap.
+
+    Both tables are deleted together, never just wallet_open_ledger alone:
+    leaving wallet_fetch_state's watermark behind would make a future
+    re-fetch of this wallet (score climbs back into the top 100, or it
+    gets followed again) resume incrementally from that stale watermark
+    with NO carried-forward open-position state -- silently dropping any
+    position that was genuinely open at prune time, the exact
+    Flipadelphia-style survivorship gap fetch_top_scored_wallets exists to
+    prevent, just reintroduced via this prune instead of Polymarket's own
+    list. Deleting wallet_fetch_state too forces a correct full backfill
+    instead.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            DELETE FROM wallet_open_ledger
+            WHERE NOT (wallet = ANY(%(wallets)s))
+            """,
+            {"wallets": list(tracked_wallets)},
+        )
+        pruned_ledger = cur.rowcount
+        cur.execute(
+            """
+            DELETE FROM wallet_fetch_state
+            WHERE NOT (wallet = ANY(%(wallets)s))
+            """,
+            {"wallets": list(tracked_wallets)},
+        )
+        pruned_watermarks = cur.rowcount
+    conn.commit()
+    return pruned_ledger, pruned_watermarks
+
+
 def save_sirtio_scores(results: list, pop_stats: dict, leaderboard_snapshot_at: str):
     if not results:
         return
@@ -767,10 +845,10 @@ def save_sirtio_scores(results: list, pop_stats: dict, leaderboard_snapshot_at: 
                 """
                 INSERT INTO trader_sirtio_scores
                 (wallet, position_count, avg_edge_pct, shrunk_edge_pct,
-                 z_score, realized_pnl_90d, open_cost_basis, open_fraction,
+                 z_score, realized_pnl_30d, open_cost_basis, open_fraction,
                  sirtio_score, computed_at, leaderboard_snapshot_at)
                 VALUES (%(wallet)s, %(position_count)s, %(avg_edge_pct)s,
-                        %(shrunk_edge_pct)s, %(z_score)s, %(realized_pnl_90d)s,
+                        %(shrunk_edge_pct)s, %(z_score)s, %(realized_pnl_30d)s,
                         %(open_cost_basis)s, %(open_fraction)s,
                         %(sirtio_score)s, %(computed_at)s, %(leaderboard_snapshot_at)s)
                 """,
@@ -831,6 +909,7 @@ def run():
         # was rejected as unbounded, see the 2026-08-18 retention
         # discussion).
         leaderboard_wallets = {r["wallet"] for r in leaderboard_rows if r.get("wallet")}
+        wallet_set_complete = True
         try:
             conn = get_connection()
             try:
@@ -845,6 +924,7 @@ def run():
                   f"leaderboard wallets only")
             followed_wallets = set()
             top_scored_wallets = set()
+            wallet_set_complete = False
         wallets = list(leaderboard_wallets | top_scored_wallets | followed_wallets)
 
         try:
@@ -870,7 +950,7 @@ def run():
             closed_rows, bot_wallets = [], set()
 
         # Bot filter: a wallet with an extreme resolved-position count in a
-        # 90-day window isn't a human placing predictions -- it's almost
+        # 30-day window isn't a human placing predictions -- it's almost
         # certainly a market-making / arbitrage script. These wallets were
         # dominating pipeline runtime (each one triggering huge pagination
         # above, and a huge full-history activity/ledger fetch below) without
@@ -887,7 +967,7 @@ def run():
         # Trade-level realized PnL -- the actual fix for /closed-positions'
         # survivorship bias (see fetch_polymarket_activity.py and
         # realized_pnl.py for the full reasoning). This is what the site's
-        # "90-day PnL" leaderboard column should be computed from, not the
+        # "30-day PnL" leaderboard column should be computed from, not the
         # closed-positions table above, which only reflects wins.
         #
         # INCREMENTAL FETCHING, added 2026-08-14: without this, every run
@@ -945,7 +1025,7 @@ def run():
             stage_failures.append("realized_pnl")
 
         # Sirtio Score v2 (Bayesian shrinkage + Z-score) -- population stats
-        # need to reflect every tracked wallet's current 90-day ledger, not
+        # need to reflect every tracked wallet's current 30-day ledger, not
         # just wallets with new activity today. As of 2026-08-29 this is
         # incremental (see wallet_score_stats in SCHEMA above): only
         # changed_wallets, never-cached wallets, and stale cache entries get
@@ -1020,9 +1100,29 @@ def run():
                 deleted = prune_old_realized_pnl_events(conn)
             finally:
                 conn.close()
-            print(f"Pruned {deleted} trader_realized_pnl_events row(s) older than 90 days")
+            print(f"Pruned {deleted} trader_realized_pnl_events row(s) older than 30 days")
         except Exception as e:
             print(f"trader_realized_pnl_events retention cleanup failed: {e}")
+
+        # Only prune wallet_open_ledger/wallet_fetch_state against this
+        # run's tracked set when every source that feeds it actually
+        # succeeded -- "leaderboard" in stage_failures or
+        # wallet_set_complete False means `wallets` is an incomplete
+        # picture of what's really still tracked, not genuine churn, and
+        # pruning against it would wrongly delete ledger/watermark state
+        # for wallets that are still tracked but just missing from this
+        # one run's (failed) fetch.
+        if wallet_set_complete and "leaderboard" not in stage_failures and wallets:
+            try:
+                conn = get_connection()
+                try:
+                    pruned_ledger, pruned_watermarks = prune_untracked_wallet_state(conn, set(wallets))
+                finally:
+                    conn.close()
+                print(f"Pruned open-ledger state for {pruned_ledger} untracked wallet(s) "
+                      f"and fetch watermarks for {pruned_watermarks} untracked wallet(s)")
+            except Exception as e:
+                print(f"wallet_open_ledger/wallet_fetch_state retention cleanup failed: {e}")
 
         if stage_failures:
             print(f"\nPipeline run completed with failures in: {stage_failures} "

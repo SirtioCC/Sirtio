@@ -33,10 +33,10 @@ windows even at a 60-day granularity).
 
 WINDOW (this is separate from the pagination fix above -- see
 realized_pnl.py): unlike the closed-positions fetcher, this pulls
-FULL history, not just the last 90 days, since correct realized PnL
-for a sale inside the 90-day window requires knowing the true cost
+FULL history, not just the last 30 days, since correct realized PnL
+for a sale inside the 30-day window requires knowing the true cost
 basis from that position's original purchase, which may be older.
-The 90-day filter gets applied later, to the realized events the
+The 30-day filter gets applied later, to the realized events the
 ledger produces, not to the raw trade fetch itself.
 
 SPLIT/MERGE ADDED (2026-08-16): confirmed live against a real wallet
@@ -74,7 +74,7 @@ ACTIVITY_EVENT_CAP = 3000  # a wallet with more than this many raw
 # TRADE/REDEEM/SPLIT/MERGE events across the lookback window isn't a
 # human placing predictions -- almost certainly a market-making/
 # arbitrage bot. This is DIFFERENT from the closed-positions bot cap
-# (which counts RESOLVED POSITIONS in a 90-day window) -- a bot can
+# (which counts RESOLVED POSITIONS in a 30-day window) -- a bot can
 # have very few resolved positions while still generating thousands of
 # raw trade events (e.g. repeatedly buying/selling the same market, or
 # many small partial fills), so the closed-positions cap alone doesn't
@@ -292,9 +292,9 @@ def normalize_activity_event(wallet: str, e: dict) -> dict:
 
 
 LOOKBACK_DAYS = 2 * 365  # cap how far back cost-basis history is fetched.
-# Scoring only ever looks at positions resolved in the last 90 days,
+# Scoring only ever looks at positions resolved in the last 30 days,
 # but computing THAT correctly requires each position's original buy
-# trade, which can predate the 90-day window by a lot (a position held
+# trade, which can predate the 30-day window by a lot (a position held
 # 150 days that resolves 3 days ago still needs its 150-day-old buy).
 # 2 years is a generous margin above any realistic hold time while
 # avoiding an unbounded fetch back to Polymarket's 2020 launch.

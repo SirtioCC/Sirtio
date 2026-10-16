@@ -5,7 +5,7 @@ Background: re-running the pipeline against UNCHANGED underlying trade
 data used to move traders between tiers anyway. Root cause: compute_
 population_stats/compute_scores were fed the entire wallet_score_stats
 cache, which only grows (a wallet's cache row is dropped only once ALL
-its positions have aged out of the 90-day window -- see fetch_position_
+its positions have aged out of the 30-day window -- see fetch_position_
 returns), not just the currently-tracked wallet set. As more low-
 position-count, no-longer-tracked wallets accumulated in that cache
 across runs, they diluted std_z / collapsed tau2 (see compute_scores),
@@ -100,7 +100,7 @@ class ScoreStabilityUnderCacheGrowthTest(unittest.TestCase):
         # point (so they got cached) but have since fallen out of the
         # leaderboard/top-scored/followed set -- exactly the kind of
         # row fetch_position_returns leaves in wallet_score_stats until
-        # its positions fully age out of the 90-day window.
+        # its positions fully age out of the 30-day window.
         self.stale_cache_growth = {
             f"stale_untracked_{i}": wallet_stats(1, 0.0, 0.0) for i in range(500)
         }

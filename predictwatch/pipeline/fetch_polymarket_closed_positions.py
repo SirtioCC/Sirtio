@@ -17,10 +17,12 @@ or the site's queries -- this just gets the data flowing into storage
 so it's available for a future methodology upgrade, without changing
 today's live scoring while that's designed properly.
 
-WINDOW: last 90 days only, matching the site's PM Score window. A
-real wallet was found with 99,000+ closed positions -- fetching all
-of it would be enormous and mostly wasted, since PM Score only uses
-the last 90 days anyway. Fixed by stopping pagination as soon as a
+WINDOW: last 30 days only, matching the site's PM Score window
+(shrunk from 90 to 30 days on 2026-10-15 -- see run_pipeline.py's
+prune_old_realized_pnl_events). A real wallet was found with
+99,000+ closed positions -- fetching all of it would be enormous and
+mostly wasted, since PM Score only uses the last 30 days anyway.
+Fixed by stopping pagination as soon as a
 position older than the window is seen, since results are sorted
 newest-first by timestamp -- everything after that point is
 guaranteed to be even older.
@@ -39,9 +41,9 @@ from datetime import datetime, timezone, timedelta
 
 CLOSED_POSITIONS_URL = "https://data-api.polymarket.com/closed-positions"
 PAGE_LIMIT = 50  # confirmed API max for this endpoint (much smaller than /positions' 500)
-WINDOW_DAYS = 90
+WINDOW_DAYS = 30
 BOT_POSITION_CAP = 3000  # a wallet with more resolved positions than this in a
-# 90-day window isn't a human placing predictions -- almost certainly a
+# 30-day window isn't a human placing predictions -- almost certainly a
 # market-making/arbitrage script. Stop paginating for that wallet as soon
 # as the running count crosses this line, rather than fetching its entire
 # history first and judging afterward (real wallets seen with 25,000-
@@ -111,7 +113,7 @@ def fetch_closed_positions_for_wallet(wallet: str, window_days: int = WINDOW_DAY
         if len(closed) > BOT_POSITION_CAP:
             hit_bot_cap = True
             print(f"    {wallet} exceeded {BOT_POSITION_CAP} resolved positions "
-                  f"within the 90-day window (likely bot) - stopping early at "
+                  f"within the 30-day window (likely bot) - stopping early at "
                   f"{len(closed)}.")
             break
 

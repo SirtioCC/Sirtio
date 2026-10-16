@@ -7,7 +7,7 @@ export type LeaderboardTrader = {
   wallet: string;
   username: string | null;
   volume: number;
-  realized_pnl_90d: number | null;
+  realized_pnl_30d: number | null;
   position_count: number;
   avg_edge_pct: number | null;
   z_score: number | null;
@@ -36,7 +36,7 @@ export type HeroStats = {
  * TWO components, 50/50:
  *  - avg_edge_pct: mean percent return per resolved position (quality
  *    of each trade)
- *  - realized_pnl_90d: total dollar PnL, sign-preserving log-compressed
+ *  - realized_pnl_30d: total dollar PnL, sign-preserving log-compressed
  *    so a handful of extreme wallets (real observed range: -$49.5M to
  *    +$16.1M) don't blow out the scale for everyone else (magnitude of
  *    demonstrated success)
@@ -71,7 +71,7 @@ export type HeroStats = {
  * Sirtio Score v2, 2026-08-14 -- Bayesian-shrunk, risk-adjusted mean
  * return, replacing the old live-SQL edge+magnitude+multiplier formula.
  * Computed ONCE PER PIPELINE RUN in Python (see sirtio_score.py),
- * against the full 90-day realized-PnL ledger, and stored in
+ * against the full 30-day realized-PnL ledger, and stored in
  * trader_sirtio_scores -- this function just reads the precomputed
  * result, it does not compute the score itself. See sirtio_score.py
  * for the full derivation (empirical Bayes shrinkage + a Bayesian
@@ -124,7 +124,7 @@ export async function getFollowedTraders(wallets: string[]): Promise<Leaderboard
       u.wallet,
       u.username,
       NULL::float8 AS volume,
-      s.realized_pnl_90d,
+      s.realized_pnl_30d,
       COALESCE(s.position_count, 0) AS position_count,
       s.avg_edge_pct,
       s.z_score,
@@ -216,7 +216,7 @@ export async function getLeaderboard(limit = 25): Promise<LeaderboardTrader[]> {
         w.wallet,
         w.username,
         w.volume,
-        COALESCE(s.realized_pnl_90d, 0) AS realized_pnl_90d,
+        COALESCE(s.realized_pnl_30d, 0) AS realized_pnl_30d,
         COALESCE(s.position_count, 0) AS position_count,
         s.avg_edge_pct,
         s.z_score,
@@ -296,7 +296,7 @@ export type TraderDetail = {
   username: string | null;
   rank: number | null;
   volume: number | null;
-  realized_pnl_90d: number | null;
+  realized_pnl_30d: number | null;
   // open_fraction, added 2026-08-28: share of this wallet's total
   // (open + closed) cost basis that's still sitting in unresolved open
   // positions -- see trader_sirtio_scores.open_fraction / sirtio_score.py
@@ -414,7 +414,7 @@ export const getTraderStats = cache(async (wallet: string): Promise<TraderDetail
       w.username,
       r.rank,
       w.volume,
-      COALESCE(s.realized_pnl_90d, 0) AS realized_pnl_90d,
+      COALESCE(s.realized_pnl_30d, 0) AS realized_pnl_30d,
       s.open_fraction,
       COALESCE(s.position_count, 0) AS position_count,
       s.avg_edge_pct,
@@ -475,7 +475,7 @@ export async function getTraderPositions(wallet: string): Promise<TraderPosition
       FROM trader_realized_pnl_events
       WHERE wallet = ${wallet}
         AND closed_at IS NOT NULL
-        AND closed_at >= (NOW() - INTERVAL '90 days')
+        AND closed_at >= (NOW() - INTERVAL '30 days')
       GROUP BY condition_id
       HAVING SUM(realized_pnl) != 0
     )
@@ -499,17 +499,17 @@ export async function getTraderPositions(wallet: string): Promise<TraderPosition
 /**
  * Backs the "All Positions" window label on the trader page, added
  * 2026-08-26. A wallet that Sirtio only started tracking recently has
- * NOT had a full 90-day window fetched, even though getTraderPositions
- * filters on closed_at >= NOW() - 90 days -- a real position that
+ * NOT had a full 30-day window fetched, even though getTraderPositions
+ * filters on closed_at >= NOW() - 30 days -- a real position that
  * resolved before Sirtio started watching this wallet (e.g. an old
  * settled bet) will never appear, no matter how the closed_at filter
  * is written, because the ledger row for it was never fetched at all.
- * Labeling the table "Last 90 Days" in that case overstates coverage.
+ * Labeling the table "Last 30 Days" in that case overstates coverage.
  *
  * Returns the earliest fetched_at Sirtio has EVER recorded for this
  * wallet's realized-PnL ledger, with NO closed_at filter -- this is
  * about when WE started watching the wallet, not which positions are
- * shown in the 90-day table above it.
+ * shown in the 30-day table above it.
  */
 export async function getPositionsTrackingStart(wallet: string): Promise<string | null> {
   const rows = await sql<{ tracking_started_at: string | null }[]>`
