@@ -1,0 +1,20 @@
+name: IndexNow ping
+
+on:
+  schedule:
+    # Once a day. Trader scores change daily, so more often adds no value
+    # and many pings of unchanged URLs can look like spam to search engines.
+    - cron: "37 11 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Submit sitemap URLs to IndexNow
+        run: python indexnow_ping.py
+        working-directory: predictwatch/pipeline
