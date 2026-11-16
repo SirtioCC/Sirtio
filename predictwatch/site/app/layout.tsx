@@ -33,8 +33,11 @@ const SITE_URL = "https://www.sirtio.com";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
+  // "./" resolves against each page's own URL. It was "/", which gave
+  // every page the home page as its canonical and told Google that all
+  // pages were duplicates of the home page.
   alternates: {
-    canonical: "/",
+    canonical: "./",
   },
   title: {
     default: "Sirtio: Prediction Market Intelligence",
