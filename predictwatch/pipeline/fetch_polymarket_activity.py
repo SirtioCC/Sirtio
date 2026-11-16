@@ -187,6 +187,37 @@ def _fetch_window(wallet: str, start_ts: int, end_ts: int):
     return events, False
 
 
+def fetch_incremental_for_wallet(wallet: str, since_ts: int, now_ts: int):
+    """
+    Forward catch-up for a wallet seen before. Added 2026-11-15.
+
+    v2 cursor paging has no offset cap, so one forward window
+    [since_ts, now_ts] in ASC order is enough (the backward 60-day
+    windows below exist only for v1's offset cap).
+
+    Returns (events, hit_bot_cap, resume_ts). resume_ts is the watermark
+    to save. If the bot cap stops the fetch early, resume_ts is the last
+    fetched timestamp, NOT now -- otherwise everything between the cutoff
+    and now is skipped for good (confirmed 2026-11-15: after a 13-day
+    outage, 78 of 178 wallets lost the rest of their backlog this way).
+    Events in that last second are dropped so the next run (start is
+    inclusive) gets that second complete with no duplicate trades.
+    """
+    events, _ = _fetch_window(wallet, since_ts, now_ts)
+    if len(events) <= ACTIVITY_EVENT_CAP:
+        return events, False, now_ts
+
+    print(f"    {wallet} exceeded {ACTIVITY_EVENT_CAP} trade/redeem/"
+          f"split/merge events (likely bot, or a long catch-up) -- "
+          f"stopping at {len(events)}, will resume next run.")
+    last_ts = max(e.get("timestamp") or 0 for e in events)
+    kept = [e for e in events if (e.get("timestamp") or 0) < last_ts]
+    if kept:
+        return kept, True, last_ts
+    # Every event shares one second: keep them and step past it.
+    return events, True, last_ts + 1
+
+
 def fetch_activity_for_wallet(wallet: str, earliest_ts: int = 0):
     """
     Fetch a wallet's full TRADE/REDEEM/SPLIT/MERGE history by walking
@@ -348,14 +379,20 @@ def run(wallets: list[str], watermarks: dict[str, int] | None = None):
         is_incremental = wallet in watermarks
         earliest_ts = watermarks.get(wallet, default_earliest_ts)
         try:
-            raw, hit_bot_cap = fetch_activity_for_wallet(wallet, earliest_ts=earliest_ts)
+            if is_incremental:
+                raw, hit_bot_cap, resume_ts = fetch_incremental_for_wallet(
+                    wallet, earliest_ts, fetch_start_ts
+                )
+            else:
+                raw, hit_bot_cap = fetch_activity_for_wallet(wallet, earliest_ts=earliest_ts)
+                resume_ts = fetch_start_ts
             if hit_bot_cap:
                 bot_wallets.add(wallet)
             normalized = [normalize_activity_event(wallet, e) for e in raw]
             usable = [e for e in normalized if e["event_type"] is not None]
             usable.sort(key=lambda e: e["timestamp"] or 0)
             result[wallet] = usable
-            new_watermarks[wallet] = fetch_start_ts
+            new_watermarks[wallet] = resume_ts
             mode = "incremental" if is_incremental else "full backfill"
             print(f"  [{i}/{len(wallets)}] {wallet}: {len(usable)} trade/redeem/"
                   f"split/merge events ({mode})")
