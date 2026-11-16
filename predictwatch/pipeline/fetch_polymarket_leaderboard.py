@@ -19,10 +19,12 @@ Polymarket-only one.
 import requests
 from datetime import datetime, timezone
 
-LEADERBOARD_URL = "https://data-api.polymarket.com/v1/leaderboard"
-TIME_PERIOD = "MONTH"
+# Migrated 2026-11-15: /v1/leaderboard now returns 410 Gone. v2 uses
+# snake_case fields, a { data, pagination } envelope, and limit up to 1000
+# (no 50-row page cap, so one call covers TARGET_COUNT).
+LEADERBOARD_URL = "https://data-api.polymarket.com/v2/leaderboard"
+TIME_PERIOD = "month"
 TARGET_COUNT = 100
-PAGE_SIZE = 50  # API max per call
 
 
 def fetch_leaderboard():
@@ -31,31 +33,24 @@ def fetch_leaderboard():
     Returns a list of dicts, deduplicated by wallet in case of overlap
     between pages.
     """
+    params = {
+        "time_period": TIME_PERIOD,
+        "sort_by": "PNL",
+        "limit": TARGET_COUNT,
+    }
+    resp = requests.get(LEADERBOARD_URL, params=params, timeout=30)
+    resp.raise_for_status()
+    page = resp.json().get("data") or []
+
     all_rows = []
     seen_wallets = set()
-
-    for offset in range(0, TARGET_COUNT, PAGE_SIZE):
-        params = {
-            "timePeriod": TIME_PERIOD,
-            "limit": PAGE_SIZE,
-            "offset": offset,
-        }
-        resp = requests.get(LEADERBOARD_URL, params=params, timeout=30)
-        resp.raise_for_status()
-        page = resp.json()
-
-        if not page:
-            # No more results -- stop paginating early.
-            break
-
-        for entry in page:
-            wallet = entry.get("proxyWallet")
-            if wallet and wallet in seen_wallets:
-                continue
-            if wallet:
-                seen_wallets.add(wallet)
-            all_rows.append(entry)
-
+    for entry in page:
+        wallet = entry.get("user_id")
+        if wallet and wallet in seen_wallets:
+            continue
+        if wallet:
+            seen_wallets.add(wallet)
+        all_rows.append(entry)
     return all_rows
 
 
@@ -63,9 +58,9 @@ def normalize_entry(e: dict) -> dict:
     """Normalize a leaderboard entry into our schema."""
     return {
         "rank": int(e["rank"]) if e.get("rank") is not None else None,
-        "wallet": e.get("proxyWallet"),
-        "username": e.get("userName") or None,
-        "volume": e.get("vol"),
+        "wallet": e.get("user_id"),
+        "username": e.get("user_name") or None,
+        "volume": e.get("volume"),
         "pnl": e.get("pnl"),
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }

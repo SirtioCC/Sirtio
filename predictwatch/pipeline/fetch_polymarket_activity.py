@@ -67,8 +67,10 @@ import time
 import requests
 from datetime import datetime, timezone
 
-ACTIVITY_URL = "https://data-api.polymarket.com/activity"
-PAGE_LIMIT = 500  # API max, confirmed in docs
+# Migrated 2026-11-15: /activity now returns 410 Gone. v2 uses cursor
+# pagination (no offset cap), snake_case fields, { data, pagination }.
+ACTIVITY_URL = "https://data-api.polymarket.com/v2/activity"
+PAGE_LIMIT = 1000  # v2 max
 OFFSET_CAP = 5000  # confirmed via Polymarket's own docs
 ACTIVITY_EVENT_CAP = 3000  # a wallet with more than this many raw
 # TRADE/REDEEM/SPLIT/MERGE events across the lookback window isn't a
@@ -136,41 +138,33 @@ def _fetch_window(wallet: str, start_ts: int, end_ts: int):
     this as the complete set for that range.
     """
     events = []
-    offset = 0
+    cursor = None
     while True:
-        if offset >= OFFSET_CAP:
-            return events, True
-        params = {
-            "user": wallet,
-            "type": "TRADE,REDEEM,SPLIT,MERGE",
-            "limit": PAGE_LIMIT,
-            "offset": offset,
-            "start": start_ts,
-            "end": end_ts,
-            "sortBy": "TIMESTAMP",
-            "sortDirection": "ASC",
-        }
-
-        batch = None
-        for attempt in range(1, 4):
-            resp = _request_with_backoff(params)
-            if resp.status_code == 400:
-                # Confirmed expected behavior at the offset cap, not a
-                # real error -- treat like reaching the cap above.
-                return events, True
-            resp.raise_for_status()
-            batch = resp.json()
-            if batch:
-                break
-            if attempt < 3:
-                time.sleep(1.5 * attempt)
-
-        if not batch:
-            break
+        # v2 rejects "offset" (even 0); first page sends no cursor.
+        # A cursor pins sort/window, so later pages send only cursor+user.
+        if cursor:
+            params = {"user": wallet, "cursor": cursor}
+        else:
+            params = {
+                "user": wallet,
+                "type": "TRADE,REDEEM,SPLIT,MERGE",
+                "limit": PAGE_LIMIT,
+                "start": start_ts,
+                "end": end_ts,
+                "sort_by": "TIMESTAMP",
+                "sort_direction": "ASC",
+            }
+        resp = _request_with_backoff(params)
+        resp.raise_for_status()
+        body = resp.json()
+        batch = body.get("data") or []
         events.extend(batch)
-        offset += PAGE_LIMIT
-        if len(batch) < PAGE_LIMIT:
+        pagination = body.get("pagination") or {}
+        cursor = pagination.get("next_cursor")
+        if not batch or not cursor or not pagination.get("has_more", True):
             break
+        if len(events) > ACTIVITY_EVENT_CAP:
+            break  # likely bot; caller's cap check handles it
         time.sleep(0.2)
     return events, False
 
@@ -270,24 +264,25 @@ def normalize_activity_event(wallet: str, e: dict) -> dict:
     else:
         event_type = None
 
-    outcome_index = e.get("outcomeIndex")
+    # v2 is snake_case; fall back to v1 names for safety.
+    outcome_index = e.get("outcome_index", e.get("outcomeIndex"))
     if outcome_index == 999:  # Polymarket's sentinel for SPLIT/MERGE
         outcome_index = None
 
     return {
         "wallet": wallet,
-        "asset": e.get("asset") or None,  # "" -> None for SPLIT/MERGE
-        "condition_id": e.get("conditionId"),
+        "asset": (e.get("token_id") or e.get("asset")) or None,  # "" -> None for SPLIT/MERGE
+        "condition_id": e.get("condition_id") or e.get("conditionId"),
         "outcome": e.get("outcome") or None,
         "outcome_index": outcome_index,
         "event_type": event_type,
         "price": e.get("price"),
         "size": e.get("size"),
-        "usdc_size": e.get("usdcSize"),  # meaningful for SPLIT/MERGE;
+        "usdc_size": e.get("usdc_size", e.get("usdcSize")),  # meaningful for SPLIT/MERGE;
                                           # not previously extracted
         "timestamp": e.get("timestamp"),
         "title": e.get("title"),
-        "transaction_hash": e.get("transactionHash"),
+        "transaction_hash": e.get("transaction_hash") or e.get("transactionHash"),
     }
 
 
