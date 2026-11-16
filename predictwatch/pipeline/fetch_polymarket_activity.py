@@ -71,6 +71,7 @@ from datetime import datetime, timezone
 # pagination (no offset cap), snake_case fields, { data, pagination }.
 ACTIVITY_URL = "https://data-api.polymarket.com/v2/activity"
 PAGE_LIMIT = 1000  # v2 max
+WANTED_TYPES = {"TRADE", "REDEEM", "SPLIT", "MERGE"}
 OFFSET_CAP = 5000  # confirmed via Polymarket's own docs
 ACTIVITY_EVENT_CAP = 3000  # a wallet with more than this many raw
 # TRADE/REDEEM/SPLIT/MERGE events across the lookback window isn't a
@@ -137,31 +138,48 @@ def _fetch_window(wallet: str, start_ts: int, end_ts: int):
     should split it into smaller windows and retry rather than trust
     this as the complete set for that range.
     """
+    # v2 cursors pin only the sort position, not the type filter or the
+    # end bound. So we resend the full params with every cursor, and we
+    # also filter type and end_ts here in case the API ignores them.
+    # Without this, page 2+ can run past end_ts to "now" and include
+    # REWARD/REBATE rows, which inflates the bot-cap count.
+    base = {
+        "user": wallet,
+        "type": ",".join(sorted(WANTED_TYPES)),
+        "limit": PAGE_LIMIT,
+        "start": start_ts,
+        "end": end_ts,
+        "sort_by": "TIMESTAMP",
+        "sort_direction": "ASC",
+    }
     events = []
     cursor = None
+    cursor_only = False
     while True:
-        # v2 rejects "offset" (even 0); first page sends no cursor.
-        # A cursor pins sort/window, so later pages send only cursor+user.
-        if cursor:
+        if cursor is None:
+            params = dict(base)  # v2 rejects "offset", even 0
+        elif cursor_only:
             params = {"user": wallet, "cursor": cursor}
         else:
-            params = {
-                "user": wallet,
-                "type": "TRADE,REDEEM,SPLIT,MERGE",
-                "limit": PAGE_LIMIT,
-                "start": start_ts,
-                "end": end_ts,
-                "sort_by": "TIMESTAMP",
-                "sort_direction": "ASC",
-            }
+            params = dict(base, cursor=cursor)
         resp = _request_with_backoff(params)
+        if resp.status_code == 400 and cursor is not None and not cursor_only:
+            cursor_only = True  # API refused params next to a cursor
+            continue
         resp.raise_for_status()
         body = resp.json()
         batch = body.get("data") or []
-        events.extend(batch)
+        past_end = False
+        for e in batch:
+            ts = e.get("timestamp") or 0
+            if ts > end_ts:
+                past_end = True
+                break
+            if e.get("type") in WANTED_TYPES:
+                events.append(e)
         pagination = body.get("pagination") or {}
         cursor = pagination.get("next_cursor")
-        if not batch or not cursor or not pagination.get("has_more", True):
+        if past_end or not batch or not cursor or not pagination.get("has_more", True):
             break
         if len(events) > ACTIVITY_EVENT_CAP:
             break  # likely bot; caller's cap check handles it
