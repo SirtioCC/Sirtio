@@ -81,7 +81,8 @@ import json
 from datetime import datetime, timezone
 
 GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
-CONDITION_ID_BATCH_SIZE = 20  # keep query strings reasonable
+CONDITION_ID_BATCH_SIZE = 50  # repeated params; URL stays ~4 KB
+DUST_TOKENS = 0.01  # open positions below this are dropped from the ledger
 
 
 def fetch_resolution_by_condition_ids(condition_ids: list[str]) -> dict:
@@ -105,7 +106,11 @@ def fetch_resolution_by_condition_ids(condition_ids: list[str]) -> dict:
         # [], with it returned the full market object). Without this,
         # every resolution lookup silently finds nothing for exactly
         # the closed markets it exists to look up.
-        params = {"condition_ids": ",".join(batch), "closed": "true", "limit": len(batch)}
+        # A list makes requests repeat the key (condition_ids=a&condition_ids=b).
+        # Fixed 2026-11-16: the old comma-joined single value matched almost
+        # nothing, so only 294 positions were ever force-closed and
+        # wallet_open_ledger grew to 323k "open" positions (121 MB).
+        params = {"condition_ids": batch, "closed": "true", "limit": len(batch)}
         try:
             resp = requests.get(GAMMA_MARKETS_URL, params=params, timeout=30)
             resp.raise_for_status()
@@ -125,9 +130,28 @@ def fetch_resolution_by_condition_ids(condition_ids: list[str]) -> dict:
                     outcome_prices = [float(p) for p in json.loads(m.get("outcomePrices", "[]"))]
                 except Exception:
                     outcome_prices = None
-            result[cid] = {"resolved": resolved, "outcome_prices": outcome_prices}
+            result[cid] = {"resolved": resolved, "outcome_prices": outcome_prices,
+                           "closed_at": _parse_gamma_time(m.get("closedTime") or m.get("endDate"))}
         time.sleep(0.2)
+    if unique_ids:
+        print(f"    Resolution lookup: {len(result)} of {len(unique_ids)} markets found closed")
     return result
+
+
+def _parse_gamma_time(value):
+    """Gamma sends e.g. '2025-09-07 12:00:00+00' or ISO 8601. None if unparsable."""
+    if not value:
+        return None
+    v = str(value).strip().replace(" ", "T").replace("Z", "+00:00")
+    if len(v) >= 3 and v[-3] in "+-" and v[-2:].isdigit():
+        v += ":00"  # '+00' -> '+00:00'
+    try:
+        dt = datetime.fromisoformat(v)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 
 
 def fetch_outcome_token_ids(condition_ids: list[str]) -> dict:
@@ -507,7 +531,11 @@ def force_close_abandoned_positions(wallet: str, open_positions: dict):
             # the true resolution moment. Good enough to land it in
             # roughly the right window; flagged here so it's a known
             # simplification, not a hidden one.
-            "closed_at": now_iso,
+            # Market's real close time when Gamma has it (fixed 2026-11-16).
+            # Using "now" for months-old settlements would drop a burst of
+            # stale wins/losses into the 30-day score window; with the real
+            # time, old ones fall outside it and are pruned the same run.
+            "closed_at": res.get("closed_at") or now_iso,
             # No real event/tx backs a force-close, so the upsert key is
             # derived from (condition_id, asset) rather than fetch time --
             # deterministic across retries, matching the MERGE fallback
@@ -583,6 +611,8 @@ def run(wallet_events: dict, resolve_abandoned: bool = True, initial_open_positi
             force_closed_assets = {r["asset"] for r in force_closed}
             open_positions = {a: p for a, p in open_positions.items() if a not in force_closed_assets}
         all_rows.extend(realized)
+        open_positions = {a: p for a, p in open_positions.items()
+                          if (p.get("tokens") or 0) >= DUST_TOKENS}
         if open_positions:
             new_open_positions[wallet] = open_positions
         print(f"  [{i}/{len(wallet_events)}] {wallet}: {len(realized)} realized PnL events "

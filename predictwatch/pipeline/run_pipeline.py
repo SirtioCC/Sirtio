@@ -293,7 +293,10 @@ INSERT INTO trader_realized_pnl_events
 VALUES (%(wallet)s, %(condition_id)s, %(asset)s, %(market_title)s, %(outcome)s,
         %(event_type)s, %(price)s, %(size)s, %(avg_cost)s, %(realized_pnl)s,
         %(closed_at)s, %(transaction_hash)s, %(fetched_at)s)
-ON CONFLICT (wallet, asset, transaction_hash) DO UPDATE SET
+-- Matches uq_realized_pnl_dedup_hash, a unique index on a 16-byte hash of
+-- the same three columns (2026-11-16). The old 3-text-column index was
+-- 109 MB of a 500 MB free-tier database.
+ON CONFLICT ((md5(wallet || '|' || asset || '|' || transaction_hash)::uuid)) DO UPDATE SET
     market_title = EXCLUDED.market_title,
     outcome = EXCLUDED.outcome,
     event_type = EXCLUDED.event_type,
@@ -1106,6 +1109,20 @@ def run():
             print(f"Pruned {deleted} trader_realized_pnl_events row(s) older than 30 days")
         except Exception as e:
             print(f"trader_realized_pnl_events retention cleanup failed: {e}")
+
+        # Early warning for the 500 MB Supabase free-tier cap (2026-11-16).
+        try:
+            conn = get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT pg_database_size(current_database())")
+                    db_mb = cur.fetchone()[0] / 1048576
+            finally:
+                conn.close()
+            flag = "WARNING: " if db_mb >= 400 else ""
+            print(f"{flag}Database size: {db_mb:.0f} MB of 500 MB free tier")
+        except Exception as e:
+            print(f"Database size check failed: {e}")
 
         # Only prune wallet_open_ledger/wallet_fetch_state against this
         # run's tracked set when every source that feeds it actually
