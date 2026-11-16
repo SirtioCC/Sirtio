@@ -930,7 +930,10 @@ def run():
         try:
             if wallets:
                 print(f"Fetching closed positions for {len(wallets)} tracked wallets...")
-                closed_rows, bot_wallets = fetch_polymarket_closed_positions.run(wallets)
+                # Skipped 2026-11-15: /closed-positions is retired (410 Gone) and this
+                # stage only fed bot detection. The activity stage has its own
+                # ACTIVITY_EVENT_CAP bot filter, so bots are still caught.
+                closed_rows, bot_wallets = [], set()
                 print(f"Polymarket closed positions: {len(closed_rows)} rows across {len(wallets)} wallets")
                 # NOTE: no longer saved to Supabase as of 2026-08-16.
                 # trader_closed_positions_snapshots was 357MB (73% of the
