@@ -190,6 +190,8 @@ export async function generateMetadata({ params }: TraderPageProps) {
   return {
     title,
     description,
+    // Always the wallet URL, even if this page was reached by username.
+    alternates: { canonical: `/trader/${stats.wallet}` },
     robots: indexable
       ? { index: true, follow: true }
       : { index: false, follow: true },
