@@ -88,15 +88,19 @@ CREATE TABLE IF NOT EXISTS trader_realized_pnl_events (
     transaction_hash TEXT NOT NULL,
     fetched_at TIMESTAMPTZ NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_realized_pnl_wallet ON trader_realized_pnl_events(wallet);
+-- No bare (wallet) index: idx_realized_pnl_wallet_closed_at covers it.
 CREATE INDEX IF NOT EXISTS idx_realized_pnl_closed_at ON trader_realized_pnl_events(closed_at);
 -- transaction_hash uniquely identifies a real TRADE_SELL/REDEEM event.
 -- FORCE_CLOSE_RESOLVED rows (which have no real transaction) use a
 -- deterministic synthetic hash instead of a fetch-time value -- so a
 -- rerun updates the same row (refreshed closed_at/pnl) instead of
 -- inserting a new duplicate every single pipeline run.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_realized_pnl_wallet_asset_txhash
-    ON trader_realized_pnl_events(wallet, asset, transaction_hash);
+-- Unique on a 16-byte md5 of the three columns (2026-11-16). The old
+-- (wallet, asset, transaction_hash) index was ~100 MB of the 500 MB free
+-- tier. REALIZED_PNL_INSERT_SQL's ON CONFLICT must match this expression.
+-- Do NOT re-add the old index here: this SQL runs every pipeline start.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_realized_pnl_dedup_hash
+    ON trader_realized_pnl_events ((md5(wallet || '|' || asset || '|' || transaction_hash)::uuid));
 
 -- Tracks the latest activity timestamp successfully fetched per wallet,
 -- so the daily run only pulls NEW trade/redeem events since last time
