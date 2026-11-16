@@ -6,6 +6,7 @@ import PositionsList from "@/components/PositionsList";
 import { getTraderStats, getTraderPositions, getPositionsTrackingStart, resolveWallet, type TraderPosition } from "@/lib/queries";
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 import { scoreTier, SCORE_TIER_CUTOFFS, MIN_POSITIONS_FOR_RANKING } from "@/lib/tiers";
+import { isIndexableTrader } from "@/lib/seo";
 // Was force-dynamic (fresh Supabase query on every single request) --
 // switched to a 5-minute revalidation window 2026-08-16 after this
 // hit Supabase's free-tier egress cap (115% of 5GB in one billing
@@ -182,9 +183,16 @@ export async function generateMetadata({ params }: TraderPageProps) {
   // trader pages back to Twitter's small "summary" card default (confirmed
   // live: trader page source showed twitter:card=summary while every other
   // page correctly inherited summary_large_image from the layout).
+  // Pages outside the top traders stay reachable but are kept out of
+  // Google's index for now (see lib/seo.ts). "follow" lets Google still
+  // pass link value through them.
+  const indexable = isIndexableTrader(stats);
   return {
     title,
     description,
+    robots: indexable
+      ? { index: true, follow: true }
+      : { index: false, follow: true },
     openGraph: { title, description },
     twitter: { card: "summary_large_image", title, description },
   };
