@@ -7,6 +7,7 @@ import { getTraderStats, getTraderPositions, getPositionsTrackingStart, resolveW
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 import { scoreTier, SCORE_TIER_CUTOFFS, MIN_POSITIONS_FOR_RANKING } from "@/lib/tiers";
 import { isIndexableTrader } from "@/lib/seo";
+import { connection } from "next/server";
 import LiveTraderView from "@/components/LiveTraderView";
 import { liveLookup, FULL_WALLET_RE, type LiveLookupResult } from "@/lib/liveLookup";
 // Was force-dynamic (fresh Supabase query on every single request) --
@@ -256,6 +257,13 @@ export default async function TraderPage({
     let live: LiveLookupResult | null = null;
     let liveFailed = false;
     if (FULL_WALLET_RE.test(wallet)) {
+      // Opt live lookups out of this route's 5-minute ISR page cache.
+      // Without this, one failed lookup was cached as the "Polymarket did
+      // not respond" page for that wallet for 5 minutes, so "try again in
+      // a minute" could not work. Polymarket responses are still cached
+      // at the fetch layer (lib/liveLookup.ts, 200s only), so this does
+      // not add API load.
+      await connection();
       try {
         live = await liveLookup(wallet);
       } catch (err) {

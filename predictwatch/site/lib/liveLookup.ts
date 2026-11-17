@@ -99,6 +99,50 @@ async function getPopulationStats(): Promise<PopStats | null> {
   };
 }
 
+// Same browser User-Agent the pipeline fetchers send. Polymarket's edge
+// rejects or throttles some requests with a bare server User-Agent.
+const HEADERS = {
+  Accept: "application/json",
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+};
+const ATTEMPTS = 3;
+const REQUEST_TIMEOUT_MS = 8000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * One page, with retries. First live failure (2026-11-16): a second
+ * lookup in a row failed the whole page on one bad response. Retries
+ * cover 429 / 5xx / network errors / timeouts; a 4xx other than 429 is
+ * a real error and is not retried.
+ */
+async function fetchPage(url: string): Promise<ClosedPosition[]> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, {
+        next: { revalidate: CACHE_SECONDS },
+        headers: HEADERS,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      if (res.ok) {
+        const body = await res.json();
+        return Array.isArray(body) ? (body as ClosedPosition[]) : [];
+      }
+      lastErr = new Error(`Polymarket closed-positions HTTP ${res.status}`);
+      if (res.status !== 429 && res.status < 500) break;
+      const retryAfter = Number(res.headers.get("retry-after"));
+      await sleep(retryAfter > 0 ? Math.min(retryAfter, 5) * 1000 : 700 * attempt);
+    } catch (err) {
+      lastErr = err;
+      await sleep(700 * attempt);
+    }
+  }
+  throw lastErr;
+}
+
 async function fetchClosedPositions(wallet: string): Promise<{ items: ClosedPosition[]; partial: boolean }> {
   const cutoff = Math.floor(Date.now() / 1000) - WINDOW_DAYS * 86400;
   const items: ClosedPosition[] = [];
@@ -111,13 +155,18 @@ async function fetchClosedPositions(wallet: string): Promise<{ items: ClosedPosi
       sortBy: "TIMESTAMP",
       sortDirection: "DESC",
     });
-    const res = await fetch(`${CLOSED_POSITIONS_URL}?${params}`, {
-      next: { revalidate: CACHE_SECONDS },
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) throw new Error(`Polymarket closed-positions ${res.status}`);
-    const batch = (await res.json()) as ClosedPosition[];
-    if (!Array.isArray(batch) || batch.length === 0) return { items, partial: false };
+    let batch: ClosedPosition[];
+    try {
+      batch = await fetchPage(`${CLOSED_POSITIONS_URL}?${params}`);
+    } catch (err) {
+      // Page 1 failing means we have nothing: let the caller show the
+      // error. A later page failing still leaves a real (recent) sample,
+      // so score it and mark it partial instead of throwing it all away.
+      if (page === 0) throw err;
+      console.error("liveLookup: later page failed, scoring partial", wallet, page, err);
+      return { items, partial: true };
+    }
+    if (batch.length === 0) return { items, partial: false };
 
     for (const p of batch) {
       // Sorted newest-first: the first too-old row means everything after
