@@ -104,7 +104,10 @@ export type LiveProfile = {
 type LeaderboardUser = { data?: { user_name?: string; rank_pnl?: number; pnl?: number } | null };
 type ActivityPage = { data?: { timestamp?: number; name?: string }[] };
 
-async function fetchProfile(wallet: string): Promise<LiveProfile> {
+// Exported for the trader page's generateMetadata (tab title). Same
+// URLs as the page render, so Next's fetch memoization/cache dedupes
+// them: no extra Polymarket calls per page view.
+export async function fetchProfile(wallet: string): Promise<LiveProfile> {
   const [lb, act] = await Promise.allSettled([
     fetchPage<LeaderboardUser>(`${LEADERBOARD_URL}?time_period=all&user=${wallet}`),
     fetchPage<ActivityPage>(`${ACTIVITY_URL}?user=${wallet}&limit=1`),
