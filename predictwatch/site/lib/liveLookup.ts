@@ -33,28 +33,33 @@ const PRIOR_VARIANCE_DF = 15;
 const WINDOW_DAYS = 30;
 
 // --- live-lookup limits ---
-const CLOSED_POSITIONS_URL = "https://data-api.polymarket.com/closed-positions";
-const PAGE_LIMIT = 50; // API max for this endpoint
-// 20 pages = up to 1,000 positions. Keeps a lookup to a few seconds and
-// bounds Polymarket calls per request. A wallet past this is almost
-// certainly a bot (pipeline's own BOT_POSITION_CAP is 3,000) and gets
-// flagged as partial rather than silently scored on a truncated sample.
-const MAX_PAGES = 20;
+// Data API v2. v1 (/closed-positions) was retired and returns HTTP 410
+// -- that was the real cause of the "Polymarket did not respond" page on
+// the first live deploy (2026-11-16). The pipeline's own fetchers were
+// already on v2 (/v2/activity, /v2/leaderboard).
+const POSITIONS_URL = "https://data-api.polymarket.com/v2/positions";
+const PAGE_LIMIT = 1000; // v2 max first-page size
+// 3 pages = up to 3,000 positions, the same line as the pipeline's
+// BOT_POSITION_CAP. Past this the wallet is almost certainly a bot and
+// is flagged partial rather than silently scored on a truncated sample.
+const MAX_PAGES = 3;
 const CACHE_SECONDS = 1800;
 
 export const FULL_WALLET_RE = /^0x[a-f0-9]{40}$/;
 
+// /v2/positions?status=CLOSED row (fields used here only).
 type ClosedPosition = {
-  conditionId?: string;
-  avgPrice?: number;
-  totalBought?: number;
-  realizedPnl?: number;
-  timestamp?: number;
+  condition_id?: string;
+  avg_price?: number;
+  total_size?: number; // shares
+  realized_pnl?: number;
+  last_event_at?: number; // epoch seconds
   title?: string;
   outcome?: string;
-  slug?: string;
-  eventSlug?: string;
+  event_slug?: string;
 };
+
+type V2Page = { data?: ClosedPosition[]; pagination?: { has_more?: boolean; next_cursor?: string | null } };
 
 export type LivePosition = {
   title: string;
@@ -74,7 +79,7 @@ export type LiveLookupResult = {
   realizedPnl30d: number;
   avgEdgePct: number | null;
   shrunkEdgePct: number | null;
-  partial: boolean; // hit MAX_PAGES before the 30-day cutoff
+  partial: boolean; // hit MAX_PAGES, or a later page failed
   positions: LivePosition[]; // most recent first, capped for display
   poolComputedAt: string;
 };
@@ -118,7 +123,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * cover 429 / 5xx / network errors / timeouts; a 4xx other than 429 is
  * a real error and is not retried.
  */
-async function fetchPage(url: string): Promise<ClosedPosition[]> {
+async function fetchPage(url: string): Promise<V2Page> {
   let lastErr: unknown;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     try {
@@ -128,10 +133,9 @@ async function fetchPage(url: string): Promise<ClosedPosition[]> {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (res.ok) {
-        const body = await res.json();
-        return Array.isArray(body) ? (body as ClosedPosition[]) : [];
+        return (await res.json()) as V2Page;
       }
-      lastErr = new Error(`Polymarket closed-positions HTTP ${res.status}`);
+      lastErr = new Error(`Polymarket v2/positions HTTP ${res.status}`);
       if (res.status !== 429 && res.status < 500) break;
       const retryAfter = Number(res.headers.get("retry-after"));
       await sleep(retryAfter > 0 ? Math.min(retryAfter, 5) * 1000 : 700 * attempt);
@@ -144,37 +148,38 @@ async function fetchPage(url: string): Promise<ClosedPosition[]> {
 }
 
 async function fetchClosedPositions(wallet: string): Promise<{ items: ClosedPosition[]; partial: boolean }> {
-  const cutoff = Math.floor(Date.now() / 1000) - WINDOW_DAYS * 86400;
+  // `start` filters on last_event_at server-side, so only the 30-day
+  // window comes back -- no client-side early-stop needed. The cursor
+  // does not carry `start`/`end`, so they are re-sent on every page.
+  const start = Math.floor(Date.now() / 1000) - WINDOW_DAYS * 86400;
   const items: ClosedPosition[] = [];
+  let cursor: string | null = null;
 
   for (let page = 0; page < MAX_PAGES; page++) {
+    // TIMESTAMP DESC (newest first), not the CLOSED default of
+    // REALIZED_PNL: if a bot wallet gets cut off at MAX_PAGES, the sample
+    // is its most recent trades, not its most profitable ones.
     const params = new URLSearchParams({
-      user: wallet,
-      limit: String(PAGE_LIMIT),
-      offset: String(page * PAGE_LIMIT),
-      sortBy: "TIMESTAMP",
-      sortDirection: "DESC",
+      user: wallet, status: "CLOSED", start: String(start),
+      sort_by: "TIMESTAMP", sort_direction: "DESC",
     });
-    let batch: ClosedPosition[];
+    if (cursor) params.set("cursor", cursor);
+    else params.set("limit", String(PAGE_LIMIT));
+
+    let body: V2Page;
     try {
-      batch = await fetchPage(`${CLOSED_POSITIONS_URL}?${params}`);
+      body = await fetchPage(`${POSITIONS_URL}?${params}`);
     } catch (err) {
       // Page 1 failing means we have nothing: let the caller show the
-      // error. A later page failing still leaves a real (recent) sample,
-      // so score it and mark it partial instead of throwing it all away.
+      // error. A later page failing still leaves a real sample, so score
+      // it and mark it partial instead of throwing it all away.
       if (page === 0) throw err;
       console.error("liveLookup: later page failed, scoring partial", wallet, page, err);
       return { items, partial: true };
     }
-    if (batch.length === 0) return { items, partial: false };
-
-    for (const p of batch) {
-      // Sorted newest-first: the first too-old row means everything after
-      // it is older too (same early-stop as the pipeline fetcher).
-      if (p.timestamp != null && p.timestamp < cutoff) return { items, partial: false };
-      items.push(p);
-    }
-    if (batch.length < PAGE_LIMIT) return { items, partial: false };
+    items.push(...(body.data ?? []));
+    cursor = body.pagination?.has_more ? body.pagination.next_cursor ?? null : null;
+    if (!cursor) return { items, partial: false };
   }
   return { items, partial: true };
 }
@@ -199,13 +204,14 @@ export async function liveLookup(wallet: string): Promise<LiveLookupResult | nul
   const positions: LivePosition[] = [];
 
   for (const p of items) {
-    const pnl = Number(p.realizedPnl ?? 0);
-    // totalBought is shares; cost basis in dollars = avgPrice * shares.
-    // Matches the pipeline's SUM(avg_cost * size).
-    const cost = Number(p.avgPrice ?? 0) * Number(p.totalBought ?? 0);
+    const pnl = Number(p.realized_pnl ?? 0);
+    // Cost basis in dollars = avg_price * total_size (shares). Matches
+    // the pipeline's SUM(avg_cost * size), and reproduces Polymarket's own
+    // percent_realized_pnl exactly (checked on a live row 2026-11-16).
+    const cost = Number(p.avg_price ?? 0) * Number(p.total_size ?? 0);
     realizedPnl30d += pnl;
 
-    const key = p.conditionId ?? `${p.title}-${p.timestamp}`;
+    const key = p.condition_id ?? `${p.title}-${p.last_event_at}`;
     const agg = byMarket.get(key) ?? { pnl: 0, cost: 0 };
     agg.pnl += pnl;
     agg.cost += cost;
@@ -218,8 +224,8 @@ export async function liveLookup(wallet: string): Promise<LiveLookupResult | nul
         realizedPnl: pnl,
         costBasis: cost,
         pctReturn: cost > 0 ? (pnl / cost) * 100 : null,
-        closedAt: p.timestamp ? new Date(p.timestamp * 1000).toISOString() : "",
-        url: p.eventSlug ? `https://polymarket.com/event/${p.eventSlug}` : null,
+        closedAt: p.last_event_at ? new Date(p.last_event_at * 1000).toISOString() : "",
+        url: p.event_slug ? `https://polymarket.com/event/${p.event_slug}` : null,
       });
     }
   }
