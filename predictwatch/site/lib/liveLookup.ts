@@ -38,6 +38,8 @@ const WINDOW_DAYS = 30;
 // the first live deploy (2026-11-16). The pipeline's own fetchers were
 // already on v2 (/v2/activity, /v2/leaderboard).
 const POSITIONS_URL = "https://data-api.polymarket.com/v2/positions";
+const LEADERBOARD_URL = "https://data-api.polymarket.com/v2/leaderboard";
+const ACTIVITY_URL = "https://data-api.polymarket.com/v2/activity";
 const PAGE_LIMIT = 1000; // v2 max first-page size
 // 3 pages = up to 3,000 positions, the same line as the pipeline's
 // BOT_POSITION_CAP. Past this the wallet is almost certainly a bot and
@@ -82,7 +84,40 @@ export type LiveLookupResult = {
   partial: boolean; // hit MAX_PAGES, or a later page failed
   positions: LivePosition[]; // most recent first, capped for display
   poolComputedAt: string;
+  profile: LiveProfile;
 };
+
+/**
+ * Context that is not part of the score. Added 2026-11-16 after a live
+ * lookup of an all-time #14 trader ($7.5M PnL) rendered "$0" and "--"
+ * because the wallet had not traded since June -- correct for a 30-day
+ * score, but it read as a bug. All fields are best-effort: a failed call
+ * leaves them null and never fails the page.
+ */
+export type LiveProfile = {
+  username: string | null;
+  allTimeRank: number | null;
+  allTimePnl: number | null;
+  lastActivityAt: string | null;
+};
+
+type LeaderboardUser = { data?: { user_name?: string; rank_pnl?: number; pnl?: number } | null };
+type ActivityPage = { data?: { timestamp?: number; name?: string }[] };
+
+async function fetchProfile(wallet: string): Promise<LiveProfile> {
+  const [lb, act] = await Promise.allSettled([
+    fetchPage<LeaderboardUser>(`${LEADERBOARD_URL}?time_period=all&user=${wallet}`),
+    fetchPage<ActivityPage>(`${ACTIVITY_URL}?user=${wallet}&limit=1`),
+  ]);
+  const u = lb.status === "fulfilled" ? lb.value.data ?? null : null;
+  const last = act.status === "fulfilled" ? act.value.data?.[0] ?? null : null;
+  return {
+    username: u?.user_name || last?.name || null,
+    allTimeRank: u?.rank_pnl ?? null,
+    allTimePnl: u?.pnl ?? null,
+    lastActivityAt: last?.timestamp ? new Date(last.timestamp * 1000).toISOString() : null,
+  };
+}
 
 type PopStats = { mu: number; sigma2: number; tau2: number; k: number; computed_at: string };
 
@@ -123,7 +158,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * cover 429 / 5xx / network errors / timeouts; a 4xx other than 429 is
  * a real error and is not retried.
  */
-async function fetchPage(url: string): Promise<V2Page> {
+async function fetchPage<T = V2Page>(url: string): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     try {
@@ -133,7 +168,7 @@ async function fetchPage(url: string): Promise<V2Page> {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       if (res.ok) {
-        return (await res.json()) as V2Page;
+        return (await res.json()) as T;
       }
       lastErr = new Error(`Polymarket v2/positions HTTP ${res.status}`);
       if (res.status !== 429 && res.status < 500) break;
@@ -190,9 +225,10 @@ async function fetchClosedPositions(wallet: string): Promise<{ items: ClosedPosi
  * the page catches that and shows a retry message.
  */
 export async function liveLookup(wallet: string): Promise<LiveLookupResult | null> {
-  const [pop, { items, partial }] = await Promise.all([
+  const [pop, { items, partial }, profile] = await Promise.all([
     getPopulationStats(),
     fetchClosedPositions(wallet),
+    fetchProfile(wallet),
   ]);
   if (!pop) return null;
 
@@ -251,6 +287,7 @@ export async function liveLookup(wallet: string): Promise<LiveLookupResult | nul
     partial,
     positions,
     poolComputedAt: pop.computed_at,
+    profile,
   };
 
   if (n === 0) {
