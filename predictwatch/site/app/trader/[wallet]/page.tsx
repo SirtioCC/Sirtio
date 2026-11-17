@@ -7,6 +7,8 @@ import { getTraderStats, getTraderPositions, getPositionsTrackingStart, resolveW
 import { getDisplayName, polymarketProfileUrl } from "@/lib/format";
 import { scoreTier, SCORE_TIER_CUTOFFS, MIN_POSITIONS_FOR_RANKING } from "@/lib/tiers";
 import { isIndexableTrader } from "@/lib/seo";
+import LiveTraderView from "@/components/LiveTraderView";
+import { liveLookup, FULL_WALLET_RE, type LiveLookupResult } from "@/lib/liveLookup";
 // Was force-dynamic (fresh Supabase query on every single request) --
 // switched to a 5-minute revalidation window 2026-08-16 after this
 // hit Supabase's free-tier egress cap (115% of 5GB in one billing
@@ -161,6 +163,15 @@ export async function generateMetadata({ params }: TraderPageProps) {
   }
   const stats = await getTraderStats(wallet);
   if (!stats) {
+    // Live-lookup pages are thin, unsaved, and infinite in number --
+    // keep them out of Google's index so they can't dilute the real
+    // trader pages.
+    if (FULL_WALLET_RE.test(wallet)) {
+      return {
+        title: `${wallet.slice(0, 8)}...: Live Sirtio Score`,
+        robots: { index: false, follow: true },
+      };
+    }
     return { title: "Trader Not Found" };
   }
   const name = getDisplayName(stats.username, stats.wallet);
@@ -215,10 +226,9 @@ export default async function TraderPage({
             No trader found for "{decodeURIComponent(rawParam)}"
           </p>
           <p className="text-body mb-8">
-            We only track wallets that have appeared on Polymarket's
-            Monthly leaderboard (their top traders by profit over
-            the last 30 days) so far. Try a wallet address, or browse
-            the full leaderboard below.
+            We could not match that username to a tracked trader. Paste
+            the full wallet address (0x followed by 40 characters) to
+            score any Polymarket wallet live, or browse the leaderboard.
           </p>
           <Link href="/leaderboard" className="text-accent hover:underline">
             View the leaderboard --&gt;
@@ -239,16 +249,39 @@ export default async function TraderPage({
     (stats.position_count === 0 && stats.rank === null && stats.username === null);
 
   if (noData || !stats) {
+    // Not in the tracked pool. A full 0x address gets scored live from
+    // Polymarket's public API (nothing saved) -- see lib/liveLookup.ts.
+    // Only a username we don't know, or Polymarket being down, falls
+    // through to the dead-end message below.
+    let live: LiveLookupResult | null = null;
+    let liveFailed = false;
+    if (FULL_WALLET_RE.test(wallet)) {
+      try {
+        live = await liveLookup(wallet);
+      } catch (err) {
+        console.error("liveLookup failed", wallet, err);
+        liveFailed = true;
+      }
+    }
+    if (live) {
+      return (
+        <div className="min-h-screen">
+          <Nav />
+          <LiveTraderView result={live} />
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen">
         <Nav />
         <section className="max-w-3xl mx-auto px-6 py-20 text-center">
           <p className="font-[family-name:var(--font-display)] text-3xl text-parchment mb-4">
-            No data for this wallet yet
+            {liveFailed ? "Polymarket did not respond" : "No data for this wallet yet"}
           </p>
           <p className="text-body mb-8">
-            This wallet isn't currently on Polymarket's Monthly
-            leaderboard, so we don't have position data for it yet.
+            {liveFailed
+              ? "We could not get this wallet's positions from Polymarket just now. Try again in a minute."
+              : "Paste a full wallet address (0x followed by 40 characters) to score any Polymarket wallet live."}
           </p>
           <Link href="/leaderboard" className="text-accent hover:underline">
             View the leaderboard --&gt;
