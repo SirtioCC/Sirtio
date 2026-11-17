@@ -9,7 +9,7 @@ import { scoreTier, SCORE_TIER_CUTOFFS, MIN_POSITIONS_FOR_RANKING } from "@/lib/
 import { isIndexableTrader } from "@/lib/seo";
 import { connection } from "next/server";
 import LiveTraderView from "@/components/LiveTraderView";
-import { liveLookup, FULL_WALLET_RE, type LiveLookupResult } from "@/lib/liveLookup";
+import { liveLookup, fetchProfile, FULL_WALLET_RE, type LiveLookupResult } from "@/lib/liveLookup";
 // Was force-dynamic (fresh Supabase query on every single request) --
 // switched to a 5-minute revalidation window 2026-08-16 after this
 // hit Supabase's free-tier egress cap (115% of 5GB in one billing
@@ -168,8 +168,11 @@ export async function generateMetadata({ params }: TraderPageProps) {
     // keep them out of Google's index so they can't dilute the real
     // trader pages.
     if (FULL_WALLET_RE.test(wallet)) {
+      // Polymarket username in the tab title when it has one (e.g.
+      // "GRIMDRIP: Live Sirtio Score"), wallet prefix otherwise.
+      const { username } = await fetchProfile(wallet);
       return {
-        title: `${wallet.slice(0, 8)}...: Live Sirtio Score`,
+        title: `${username ?? `${wallet.slice(0, 8)}...`}: Live Sirtio Score`,
         robots: { index: false, follow: true },
       };
     }
