@@ -24,6 +24,13 @@ export default function LiveTraderView({ result }: { result: LiveLookupResult })
   const { wallet, score, positionCount, totalPositions, realizedPnl30d, partial } = result;
   const provisional = positionCount < MIN_POSITIONS_FOR_RANKING;
   const tier = !provisional ? scoreTier(score) : null;
+  const { profile } = result;
+  // No closed positions at all in 30 days = inactive wallet. Hide the
+  // score cards (they would read "$0" / "--" and look like a bug) and
+  // show who the trader is and when they last traded instead.
+  const inactive = totalPositions === 0;
+  const fmtDate = (iso: string) =>
+    new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   return (
     <section className="max-w-6xl mx-auto px-6 py-16">
@@ -35,7 +42,7 @@ export default function LiveTraderView({ result }: { result: LiveLookupResult })
         <div>
           <div className="flex items-center gap-4 mb-2">
             <h1 className="font-[family-name:var(--font-title)] font-bold text-4xl text-parchment">
-              {truncateWallet(wallet)}
+              {profile.username ?? truncateWallet(wallet)}
             </h1>
             <FollowButton wallet={wallet} />
           </div>
@@ -67,6 +74,28 @@ export default function LiveTraderView({ result }: { result: LiveLookupResult })
         Follow this wallet to start tracking it.
       </div>
 
+      {(profile.allTimeRank !== null || profile.lastActivityAt) && (
+        <p className="mt-4 text-sm text-muted max-w-3xl">
+          {profile.allTimeRank !== null && (
+            <>All-time on Polymarket: <span className="text-parchment">#{profile.allTimeRank.toLocaleString("en-US")}</span>
+            {profile.allTimePnl !== null && <> · <span className="text-parchment">{money(profile.allTimePnl)}</span> PnL</>}</>
+          )}
+          {profile.allTimeRank !== null && profile.lastActivityAt && " · "}
+          {profile.lastActivityAt && <>Last activity: <span className="text-parchment">{fmtDate(profile.lastActivityAt)}</span></>}
+        </p>
+      )}
+
+      {inactive ? (
+        <div className="mt-8 max-w-3xl bg-surface-raised border border-accent/40 rounded-lg p-5">
+          <p className="font-mono text-xs uppercase tracking-wide text-accent mb-2">Inactive</p>
+          <p className="text-sm text-parchment">
+            This wallet has no resolved positions in the last 30 days
+            {profile.lastActivityAt && <> (last activity {fmtDate(profile.lastActivityAt)})</>}.
+            The Sirtio Score measures recent skill over a 30-day window, so
+            there is nothing to score until this wallet trades again.
+          </p>
+        </div>
+      ) : (<>
       <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
         <div className="bg-surface-raised border border-accent/40 rounded-lg p-5 text-center">
           <p className="font-mono text-xs uppercase tracking-wide text-muted">Sirtio score</p>
@@ -98,10 +127,12 @@ export default function LiveTraderView({ result }: { result: LiveLookupResult })
 
       {score === null && (
         <p className="mt-6 text-sm text-parchment max-w-3xl">
-          No qualifying resolved positions in the last 30 days, so there is
-          nothing to score yet.
+          None of this wallet&apos;s {totalPositions} resolved positions in
+          the last 30 days qualify (all are under $25 or have extreme
+          returns), so there is nothing to score yet.
         </p>
       )}
+      </>)}
 
       {result.positions.length > 0 && (
         <div className="mt-10 max-w-3xl">
