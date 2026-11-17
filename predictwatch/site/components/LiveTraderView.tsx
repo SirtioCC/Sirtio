@@ -91,7 +91,7 @@ export default function LiveTraderView({ result }: { result: LiveLookupResult })
         {positionCount} of {totalPositions} resolved positions in the last 30
         days count toward the score (positions under $25 or with extreme
         returns are excluded, same as the leaderboard).
-        {partial && " This wallet has more than 1,000 resolved positions in 30 days, so only the most recent 1,000 were checked. High-volume wallets like this are often bots."}
+        {partial && " Only the most recent part of this wallet's 30-day history was checked (very high volume, or Polymarket stopped responding part way). Treat this score as a rough estimate."}
         {" "}Population baseline from{" "}
         {new Date(result.poolComputedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}.
       </p>
