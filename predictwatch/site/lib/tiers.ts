@@ -58,12 +58,12 @@
 // maturing; it is a snapshot-calibrated constant, not a self-updating
 // one.
 // --- AUTO-RECALIBRATED (recalibrate_tiers.py) ---
-// 2026-10-16: elite -> 95.0. 56 candidates >= 75.0; largest gap 2.1 pt(s) at score 95.0 (target 95.0, stepped to 95.0 from current 96.0 under the 5.0-pt max-step guardrail). Population: 153 currently-scored wallet(s). Rewritten by the next scheduled run -- edit
+// 2026-11-23: elite -> 90.0. 37 candidates >= 75.0; largest gap 4.2 pt(s) at score 81.2 (target 81.2, stepped to 90.0 from current 95.0 under the 5.0-pt max-step guardrail). Population: 652 currently-scored wallet(s). Rewritten by the next scheduled run -- edit
 // SCORE_TIER_CUTOFFS.elite by hand if you need to override it immediately;
 // the dated history above this marker is permanent context, not touched here.
 // --- END AUTO-RECALIBRATED ---
 export const SCORE_TIER_CUTOFFS = {
-  elite: 95.0,
+  elite: 90.0,
   great: 75,
   good: 60,
   breakEven: 40,
